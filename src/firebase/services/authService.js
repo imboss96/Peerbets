@@ -156,6 +156,23 @@ export class AuthService {
   }
 
   /**
+   * Get all users (admin)
+   */
+  static async getAllUsers() {
+    try {
+      const { collection, getDocs } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+      const usersCol = collection(db, 'users');
+      const snapshot = await getDocs(usersCol);
+      const users = [];
+      snapshot.forEach(doc => users.push({ uid: doc.id, ...doc.data() }));
+      return { success: true, users };
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      return { success: false, error: error.message, users: [] };
+    }
+  }
+
+  /**
    * Update user balance
    */
   static async updateUserBalance(uid, newBalance, bonus, withdrawableBonus) {
@@ -190,6 +207,116 @@ export class AuthService {
       }
     });
   }
+
+  //survey services
+  // Add to FirebaseAuthService class
+static async saveSurveyAnswers(uid, answers) {
+  try {
+    await this.initialize();
+    
+    await this.updateDoc(this.doc(this.firebaseDb, 'users', uid), {
+      surveyCompleted: true,
+      surveyAnswers: answers,
+      surveyCompletedAt: new Date().toISOString()
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('Save survey error:', error);
+    return { success: false, error: 'Failed to save survey' };
+  }
+}
+
+static async findMatchingUsers(currentUserId, currentUserAnswers) {
+  try {
+    await this.initialize();
+    
+    const { collection, query, where, getDocs } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+    
+    // Get all users who completed survey (excluding current user)
+    const usersQuery = query(
+      collection(this.firebaseDb, 'users'),
+      where('surveyCompleted', '==', true)
+    );
+    
+    const querySnapshot = await getDocs(usersQuery);
+    const matches = [];
+    
+    querySnapshot.forEach((doc) => {
+      const userData = doc.data();
+      
+      // Skip current user
+      if (userData.uid === currentUserId) return;
+      
+      const matchScore = this.calculateMatchScore(currentUserAnswers, userData.surveyAnswers);
+      
+      if (matchScore >= 60) { // Only show matches with 60%+ compatibility
+        matches.push({
+          uid: userData.uid,
+          username: userData.username,
+          matchPercentage: matchScore,
+          bettingStyle: userData.surveyAnswers?.betting_style?.[0] || 'Not specified',
+          betRange: userData.surveyAnswers?.bet_amount_range?.[0] || 'Not specified',
+          favoriteTeams: userData.surveyAnswers?.favorite_teams || []
+        });
+      }
+    });
+    
+    // Sort by match percentage (highest first)
+    matches.sort((a, b) => b.matchPercentage - a.matchPercentage);
+    
+    return { success: true, matches: matches.slice(0, 5) }; // Return top 5 matches
+  } catch (error) {
+    console.error('Find matching users error:', error);
+    return { success: false, error: 'Failed to find matches', matches: [] };
+  }
+}
+
+static calculateMatchScore(answers1, answers2) {
+  if (!answers1 || !answers2) return 0;
+  
+  let totalScore = 0;
+  let maxScore = 0;
+  
+  Object.keys(answers1).forEach(questionId => {
+    const user1Answers = answers1[questionId] || [];
+    const user2Answers = answers2[questionId] || [];
+    
+    if (user1Answers.length > 0 && user2Answers.length > 0) {
+      const commonAnswers = user1Answers.filter(answer => 
+        user2Answers.includes(answer)
+      ).length;
+      
+      const maxAnswers = Math.max(user1Answers.length, user2Answers.length);
+      totalScore += (commonAnswers / maxAnswers) * 100;
+      maxScore += 100;
+    }
+  });
+  
+  return maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+}
+
+static async createP2PBet(betData) {
+  try {
+    await this.initialize();
+    
+    const { collection, addDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+    
+    const p2pBet = {
+      ...betData,
+      type: 'p2p',
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+    
+    const betRef = await addDoc(collection(this.firebaseDb, 'p2p_bets'), p2pBet);
+    
+    return { success: true, betId: betRef.id };
+  } catch (error) {
+    console.error('Create P2P bet error:', error);
+    return { success: false, error: 'Failed to create P2P bet' };
+  }
+}
 
   /**
    * Get user-friendly error messages

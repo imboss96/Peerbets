@@ -1,7 +1,77 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, Wallet, Clock, TrendingUp, RefreshCw, Users, ChevronRight, Flame, Lock, Radio, Target, Award, Zap, LogOut, User, Mail, Phone, Eye, EyeOff, Search } from 'lucide-react';
-import ApiFootballService from './services/apiFootballService';
+import { Trophy, Wallet, Clock, TrendingUp, RefreshCw, Users, ChevronRight, Flame, Lock, Radio, Target, Award, Zap, LogOut, User, Mail, Phone, Eye, EyeOff, Search, Menu, X } from 'lucide-react';
+// ApiFootballService removed — debug/live fetching disabled
 import { LEAGUE_IDS } from './services/leagueIds';
+import ColorStake from './components/ColorStake';
+import AdminDashboard from './components/AdminDashboard';
+import AdminService from './firebase/services/adminService';
+import { getDB } from './firebase/initFirebase';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+
+/* SurveyForm component disabled. To re-enable, restore the component definition here.
+const SurveyForm = ({ questions, onComplete, onSkip }) => { ... }
+*/
+
+//MATCH NOTIFACTION SERVICE
+const MatchNotification = ({ matchedUsers, onAccept, onDecline }) => {
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 rounded-xl border border-green-500/30 max-w-md w-full p-6">
+        <div className="text-center mb-6">
+          <div className="bg-green-500/20 p-4 rounded-full inline-block mb-4">
+            <Users className="w-8 h-8 text-green-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Perfect Match Found! 🎯</h2>
+          <p className="text-gray-400">We found users with similar betting interests</p>
+        </div>
+
+        <div className="bg-slate-900/50 rounded-lg p-4 mb-6">
+          <h3 className="text-lg font-bold text-white mb-3">Matched Users:</h3>
+          <div className="space-y-2">
+            {matchedUsers.map((user, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                    <User className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-white font-medium">{user.username}</p>
+                    <p className="text-xs text-gray-400">{user.matchPercentage}% match</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-green-400">{user.bettingStyle}</p>
+                  <p className="text-xs text-gray-400">Typical bet: {user.betRange}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-6">
+          <p className="text-sm text-blue-300 text-center">
+            💡 You can now place peer-to-peer bets with these users. No odds - just agree on terms!
+          </p>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onDecline}
+            className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-lg font-medium transition-colors"
+          >
+            Maybe Later
+          </button>
+          <button
+            onClick={onAccept}
+            className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg font-medium transition-colors"
+          >
+            Start Betting!
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 const FIREBASE_CONFIG = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyBYuEbHVbs-9eXqo9Ds92C6HR70__tJbV0",
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "sparkbet-af742.firebaseapp.com",
@@ -22,11 +92,11 @@ class FirebaseAuthService {
     if (this.initialized) return;
 
     try {
-      const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+      const { initializeApp, getApps, getApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
       const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, onAuthStateChanged, updateProfile } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
       const { getFirestore, doc, setDoc, getDoc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
 
-      const app = initializeApp(FIREBASE_CONFIG);
+      const app = getApps().length === 0 ? initializeApp(FIREBASE_CONFIG) : getApp();
       this.firebaseAuth = getAuth(app);
       this.firebaseDb = getFirestore(app);
       
@@ -82,6 +152,7 @@ class FirebaseAuthService {
         balance: 1000,
         bonus: 0,
         withdrawableBonus: 0,
+        isAdmin: false,
         createdAt: new Date().toISOString()
       };
 
@@ -969,7 +1040,7 @@ const ForgotPasswordForm = ({ onBack }) => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white py-3 rounded-lg font-medium transition-colors disabled:opacity-50"
+            className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white py-3 rounded-lg font-medium transition-colors disabled:opacity-50"
           >
             {loading ? 'Verifying...' : 'Verify OTP'}
           </button>
@@ -983,58 +1054,11 @@ const ForgotPasswordForm = ({ onBack }) => {
           </button>
         </form>
       )}
-
-      {step === 'password' && (
-        <form onSubmit={handleResetPassword} className="space-y-4">
-          <div className="text-center">
-            <div className="bg-green-500/20 p-3 rounded-full inline-block mb-4">
-              <Lock className="w-6 h-6 text-green-400" />
-            </div>
-            <p className="text-white font-medium mb-2">Create New Password</p>
-            <p className="text-gray-400 text-sm">Enter your new password</p>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">New Password</label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full bg-slate-900/50 border border-blue-500/30 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500"
-              placeholder="••••••••"
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">Password must be at least 6 characters</p>
-          </div>
-
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-              <p className="text-sm text-red-400">{error}</p>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white py-3 rounded-lg font-medium transition-colors disabled:opacity-50"
-          >
-            {loading ? 'Resetting...' : 'Reset Password'}
-          </button>
-
-          <button 
-            type="button" 
-            onClick={() => setStep('otp')}
-            className="w-full text-sm text-gray-400 hover:text-gray-300"
-          >
-            Back to OTP
-          </button>
-        </form>
-      )}
     </div>
   );
 };
 
-const App = () => {
+function App(props) {
   const [user, setUser] = useState(null);
   const [authView, setAuthView] = useState('login');
   const [activeBets, setActiveBets] = useState([]);
@@ -1048,15 +1072,55 @@ const App = () => {
   const [filter, setFilter] = useState('all');
   const [liveMinutes, setLiveMinutes] = useState({});
   const [loadingBets, setLoadingBets] = useState(false);
-  const [loadingMatches, setLoadingMatches] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [apiStatus, setApiStatus] = useState('connecting'); // 'connected', 'error', 'mock'
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSurvey, setShowSurvey] = useState(false);
+  const [surveyAnswers, setSurveyAnswers] = useState({});
+  const [matchedUsers, setMatchedUsers] = useState([]);
+  const [showMatchNotification, setShowMatchNotification] = useState(false);
+  const [currentMatch, setCurrentMatch] = useState(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [games, setGames] = React.useState([]);
 
+  // External events state
+  const [externalEvents, setExternalEvents] = React.useState([]);
+  const [externalLoading, setExternalLoading] = React.useState(false);
+  const [externalError, setExternalError] = React.useState(null);
 
-  
-
-
+  //SURVEY QUESTIONS AND LOGIC HERE
+  const SURVEY_QUESTIONS = [
+  {
+    id: 'favorite_teams',
+    question: 'Which football teams do you support?',
+    type: 'multi-select',
+    options: ['Chelsea', 'Arsenal', 'Manchester United', 'Liverpool', 'Manchester City', 'Barcelona', 'Real Madrid', 'Bayern Munich', 'PSG', 'AC Milan']
+  },
+  {
+    id: 'betting_style',
+    question: 'What is your betting style?',
+    type: 'single',
+    options: ['Conservative (small, frequent bets)', 'Moderate (balanced approach)', 'Aggressive (high-risk, high-reward)', 'Strategic (research-based)']
+  },
+  {
+    id: 'bet_amount_range',
+    question: 'What is your typical bet amount range?',
+    type: 'single',
+    options: ['KSH 100-500', 'KSH 500-2,000', 'KSH 2,000-5,000', 'KSH 5,000+']
+  },
+  {
+    id: 'preferred_leagues',
+    question: 'Which leagues do you prefer betting on?',
+    type: 'multi-select',
+    options: ['Premier League', 'La Liga', 'Serie A', 'Bundesliga', 'Ligue 1', 'Champions League', 'Europa League', 'International Matches']
+  },
+  {
+    id: 'betting_frequency',
+    question: 'How often do you bet?',
+    type: 'single',
+    options: ['Daily', 'Weekly', 'During weekends only', 'Only big matches', 'Occasionally']
+  }
+];
+//Load user and bets on app start
 useEffect(() => {
   const loadUserAndBets = async () => {
     setLoadingBets(true);
@@ -1077,47 +1141,13 @@ useEffect(() => {
   loadUserAndBets();
 }, []);
 
-//New for calling live sports API
-// NEW CODE - ADD THIS ENTIRE BLOCK
-useEffect(() => {
-  const fetchMatches = async () => {
-    setLoadingMatches(true);
-    setApiStatus('connecting');
-    
-    try {
-      console.log('🔄 Fetching matches from API-Football...');
-      const allGames = await ApiFootballService.getAllGames();
-      
-      if (allGames && allGames.length > 0) {
-        console.log('✅ Loaded matches:', allGames.length);
-        setMatches(allGames);
-        setApiStatus('connected');
-        setLastUpdated(new Date());
-      } else {
-        console.log('⚠️ Using mock data');
-        const mockGames = [...ApiFootballService.getMockLiveGames(), ...ApiFootballService.getMockUpcomingGames()];
-        setMatches(mockGames);
-        setApiStatus('mock');
-        setLastUpdated(new Date());
-      }
-    } catch (error) {
-      console.error('❌ Error fetching matches:', error);
-      const mockGames = [...ApiFootballService.getMockLiveGames(), ...ApiFootballService.getMockUpcomingGames()];
-      setMatches(mockGames);
-      setApiStatus('error');
-    } finally {
-      setLoadingMatches(false);
-    }
-  };
-
-  fetchMatches();
-  const matchInterval = setInterval(fetchMatches, 120000);
-  return () => clearInterval(matchInterval);
-}, []);
+// Live API-Football fetching removed (debugging code). If you want live or mock matches,
+// populate `matches` from another service or a static fixture in development.
 
   const handleLogin = async (userData) => {
   console.log('User logged in:', userData);
   setUser(userData);
+  setShowAuthModal(false);
   // Load user's bets after login - UPDATE THESE LINES
   const betsResult = await FirebaseAuthService.getUserBets(userData.uid);
   if (betsResult.success) {
@@ -1130,6 +1160,7 @@ useEffect(() => {
   const handleRegister = (userData) => {
     console.log('User registered:', userData);
     setUser(userData);
+    setShowAuthModal(false);
   };
 
   const handleLogout = async () => {
@@ -1138,15 +1169,16 @@ useEffect(() => {
     setActiveBets([]);
   };
 
+
   //Deleted segments related to calculating live match minutes for brevity
 
   const getMarketOptions = (match, marketId) => {
     switch (marketId) {
       case 'match_winner':
+        // Peer-to-peer: allow only Home / Away, no draw, no odds (market handled P2P)
         return [
-          { id: 'home', label: match.homeTeam, odds: calculateOdds(match, 'home'), pool: match.homeBets },
-          { id: 'draw', label: 'Draw', odds: calculateOdds(match, 'draw'), pool: match.drawBets, disabled: true },
-          { id: 'away', label: match.awayTeam, odds: calculateOdds(match, 'away'), pool: match.awayBets }
+          { id: 'home', label: match.homeTeam, odds: null, pool: match.homeBets || 0 },
+          { id: 'away', label: match.awayTeam, odds: null, pool: match.awayBets || 0 }
         ];
       case 'total_goals':
         return [
@@ -1184,13 +1216,21 @@ useEffect(() => {
     }
   };
 
+  //create match notification componet
+  
+
   const calculateOdds = (match, outcome) => {
     const totalOtherBets = match.totalPool - match[`${outcome}Bets`];
     if (totalOtherBets === 0) return 1.0;
     return (match.totalPool / match[`${outcome}Bets`]).toFixed(2);
   };
 
-  const placeBet = async () => {
+const placeBet = async () => {
+  if (!user) {
+    setShowAuthModal(true);
+    return;
+  }
+
   const amount = parseFloat(betAmount);
   if (!amount || amount <= 0 || amount > user.balance) {
     alert('Invalid bet amount or insufficient balance');
@@ -1214,8 +1254,9 @@ useEffect(() => {
     outcome: selectedOutcome.label,
     outcomeId: selectedOutcome.id,
     amount: amount,
-    odds: selectedOutcome.odds,
-    potentialWin: amount * parseFloat(selectedOutcome.odds),
+    // Peer-to-peer: no odds. potentialWin = stake (or business logic to compute P2P payout)
+    odds: null,
+    potentialWin: amount,
     timestamp: Timestamp.now(), // Use Firestore timestamp
     status: selectedMatch.status === 'live' ? 'live' : 'pending',
     isLive: selectedMatch.status === 'live',
@@ -1276,7 +1317,9 @@ const refreshUserBets = async () => {
   };
 
   const formatCurrency = (amount) => {
-    return `KSH ${amount.toLocaleString()}`;
+    const n = Number(amount);
+    const safe = Number.isFinite(n) ? n : 0;
+    return `KSH ${safe.toLocaleString()}`;
   };
 
   // Find this line (usually around line 750-760) and update it:
@@ -1299,96 +1342,294 @@ const filteredMatches = matches.filter(match => {
   return statusMatch && matchesSearch;
 });
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center p-4">
-        {authView === 'login' && (
-          <LoginForm
-            onLogin={handleLogin}
-            onSwitchToRegister={() => setAuthView('register')}
-            onForgotPassword={() => setAuthView('forgot')}
-            onSwitchToOTPLogin={() => setAuthView('otp-login')}
-          />
-        )}
-        {authView === 'otp-login' && (
-          <OTPLoginForm
-            onLogin={handleLogin}
-            onBack={() => setAuthView('login')}
-          />
-        )}
-        {authView === 'register' && (
-          <RegisterForm
-            onRegister={handleRegister}
-            onSwitchToLogin={() => setAuthView('login')}
-          />
-        )}
-        {authView === 'forgot' && (
-          <ForgotPasswordForm onBack={() => setAuthView('login')} />
-        )}
-      </div>
-    );
+// Auth Modal Component with dismiss button
+const AuthModal = () => (
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="absolute top-4 right-4">
+      <button
+        onClick={() => setShowAuthModal(false)}
+        aria-label="Close auth modal"
+        className="w-10 h-10 rounded-full bg-slate-700/60 hover:bg-slate-700/80 flex items-center justify-center text-white"
+      >
+        ✕
+      </button>
+    </div>
+
+    <div className="w-full max-w-md">
+      {authView === 'login' && (
+        <LoginForm
+          onLogin={handleLogin}
+          onSwitchToRegister={() => setAuthView('register')}
+          onForgotPassword={() => setAuthView('forgot')}
+          onSwitchToOTPLogin={() => setAuthView('otp-login')}
+        />
+      )}
+      {authView === 'otp-login' && (
+        <OTPLoginForm
+          onLogin={handleLogin}
+          onBack={() => setAuthView('login')}
+        />
+      )}
+      {authView === 'register' && (
+        <RegisterForm
+          onRegister={handleRegister}
+          onSwitchToLogin={() => setAuthView('login')}
+        />
+      )}
+      {authView === 'forgot' && (
+        <ForgotPasswordForm onBack={() => setAuthView('login')} />
+      )}
+    </div>
+  </div>
+);
+
+  React.useEffect(() => {
+    if (!user) return; // don't fetch games if no user
+    try {
+      const db = getDB(); // use safe initializer from firebase/initFirebase
+      const q = query(collection(db, 'games'), orderBy('kickoff', 'asc'));
+      const unsubGames = onSnapshot(q, (snap) => {
+        const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setGames(arr);
+      }, (err) => {
+        console.error('games snapshot failed', err);
+      });
+      return () => unsubGames();
+    } catch (err) {
+      console.error('useEffect error:', err);
+    }
+  }, [user]); // add user dependency
+
+  // fetch external events from api-football
+  async function fetchExternalEvents(params = {}) {
+    // api-football v3 fixtures endpoint
+    const API_URL = 'https://v3.football.api-sports.io/fixtures';
+    const API_KEY = '542516addf9ded29596b848c2693638e'; // test key you provided
+
+    setExternalLoading(true);
+    setExternalError(null);
+
+    try {
+      const url = new URL(API_URL);
+
+      // optional params: date (YYYY-MM-DD), league, season
+      if (params.date) url.searchParams.set('date', params.date);
+      if (params.league) url.searchParams.set('league', params.league);
+      if (params.season) url.searchParams.set('season', params.season);
+
+      // default: today's fixtures when no date/league provided
+      if (!params.date && !params.league) {
+        const today = new Date().toISOString().slice(0, 10);
+        url.searchParams.set('date', today);
+      }
+
+      console.debug('[fetchExternalEvents] Request URL:', url.toString());
+
+      const res = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'x-apisports-key': API_KEY,
+          'Accept': 'application/json'
+        }
+      });
+
+      console.debug('[fetchExternalEvents] status', res.status, res.statusText);
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Upstream error ${res.status}: ${text}`);
+      }
+
+      const payload = await res.json();
+      const fixtures = Array.isArray(payload.response) ? payload.response : [];
+
+      // normalize fixtures into simple events for your UI
+      const events = fixtures.map(f => ({
+        id: f.fixture?.id || `${f.fixture?.timestamp}-${Math.random()}`,
+        homeTeam: f.teams?.home?.name,
+        awayTeam: f.teams?.away?.name,
+        league: f.league?.name,
+        kickoff: f.fixture?.date,
+        status: (f.fixture?.status?.long || '').toLowerCase().includes('live') ? 'live' : 'upcoming',
+        score: f.goals || { home: 0, away: 0 },
+        raw: f
+      }));
+
+      // Use external events as the app's matches so homepage/search shows them
+      setExternalEvents(events);
+      setMatches(events);
+    } catch (err) {
+      console.error('[fetchExternalEvents] error', err);
+      if (err instanceof TypeError && err.message === 'Failed to fetch') {
+        setExternalError('Network/CORS error: browser blocked the request. Use a server-side proxy (Cloud Function) or enable CORS on the API.');
+      } else {
+        setExternalError(err.message || 'Fetch failed');
+      }
+      setExternalEvents([]);
+    } finally {
+      setExternalLoading(false);
+    }
   }
+
+  // fetch once on mount (customize params as needed)
+  React.useEffect(() => {
+    fetchExternalEvents({ date: null, league: null });
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
       <header className="bg-slate-800/50 backdrop-blur-sm border-b border-blue-500/20 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg">
-                <Trophy className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-white">SparkBets</h1>
-                <p className="text-xs text-blue-300">Live & Pre-Match Betting</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="bg-slate-700/50 px-4 py-2 rounded-lg border border-blue-500/30">
-                <div className="flex items-center gap-2">
-                  <Wallet className="w-4 h-4 text-green-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Balance</p>
-                    <p className="text-sm font-bold text-white">{formatCurrency(user.balance)}</p>
-                  </div>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowMobileMenu(true)}
+                  className="sm:hidden p-2 rounded-md bg-slate-700/30 hover:bg-slate-700/40 mr-1"
+                  aria-label="Open menu"
+                >
+                  <Menu className="w-5 h-5 text-white" />
+                </button>
+
+                <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg flex items-center">
+                  <Trophy className="w-6 h-6 text-white" />
+                </div>
+
+                <div className="ml-2">
+                  <h1 className="text-2xl font-bold text-white">SparkBets</h1>
+                  <p className="text-xs text-blue-300 hidden sm:block">Live & Pre-Match Betting</p>
                 </div>
               </div>
-              <div className="bg-slate-700/50 px-3 py-2 rounded-lg border border-blue-500/30">
-                <p className="text-sm text-white font-medium">{user.username}</p>
+
+              <div className="flex items-center gap-4">
+                {/* full controls for desktop */}
+                <div className="hidden sm:flex items-center gap-4">
+                  {user ? (
+                    <>
+                      <div className="bg-slate-700/50 px-4 py-2 rounded-lg border border-blue-500/30">
+                        <div className="flex items-center gap-2">
+                          <Wallet className="w-4 h-4 text-green-400" />
+                          <div>
+                            <p className="text-xs text-gray-400">Balance</p>
+                            <p className="text-sm font-bold text-white">{formatCurrency(user.balance)}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bg-slate-700/50 px-3 py-2 rounded-lg border border-blue-500/30">
+                        <p className="text-sm text-white font-medium">{user.username}</p>
+                      </div>
+                      <button
+                        onClick={handleLogout}
+                        className="bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 p-2 rounded-lg transition-colors"
+                        title="Logout"
+                      >
+                        <LogOut className="w-5 h-5 text-red-400" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setShowAuthModal(true)}
+                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+                      >
+                        <User className="w-4 h-4" />
+                        Login
+                      </button>
+                      <button
+                        onClick={() => {
+                          setAuthView('register');
+                          setShowAuthModal(true);
+                        }}
+                        className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg font-medium transition-colors border border-blue-500/30"
+                      >
+                        Sign Up
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* mobile: compact balance / login at top-right */}
+                <div className="flex items-center gap-3 sm:hidden">
+                  {user ? (
+                    <div className="bg-slate-700/50 px-3 py-2 rounded-lg border border-blue-500/30">
+                      <div className="flex items-center gap-2">
+                        <Wallet className="w-4 h-4 text-green-400" />
+                        <p className="text-sm font-bold text-white">{formatCurrency(user.balance)}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowAuthModal(true)}
+                      className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-3 py-2 rounded-lg font-medium"
+                    >
+                      <User className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
-              <button
-                onClick={handleLogout}
-                className="bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 p-2 rounded-lg transition-colors"
-                title="Logout"
-              >
-                <LogOut className="w-5 h-5 text-red-400" />
-              </button>
             </div>
           </div>
         </div>
       </header>
 
+      {showMobileMenu && (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowMobileMenu(false)} />
+          <div className="absolute left-0 top-0 h-full w-64 bg-slate-800/90 border-r border-blue-500/20 p-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg">
+                  <Trophy className="w-5 h-5 text-white" />
+                </div>
+                <h3 className="text-lg font-bold text-white">Menu</h3>
+              </div>
+              <button onClick={() => setShowMobileMenu(false)} className="p-2 rounded-md bg-slate-700/30">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <button onClick={() => { setView('myBets'); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">My Bets</button>
+              <button onClick={() => { setView('wallet'); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">Wallet</button>
+              <button onClick={() => { if (user) { setView('wallet'); } else { setAuthView('login'); setShowAuthModal(true); } setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">Profile Settings</button>
+              {user && (
+                <button onClick={() => { handleLogout(); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-red-400">Logout</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <nav className="bg-slate-800/30 backdrop-blur-sm border-b border-blue-500/10">
         <div className="max-w-7xl mx-auto px-4">
-          <div className="flex gap-1">
-            {[
-              { id: 'matches', label: 'Matches', icon: Flame },
-              { id: 'myBets', label: 'My Bets', icon: TrendingUp },
-              { id: 'wallet', label: 'Wallet', icon: Wallet }
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setView(tab.id)}
-                className={`flex items-center gap-2 px-6 py-3 font-medium transition-all ${
-                  view === tab.id
-                    ? 'text-white border-b-2 border-blue-500 bg-slate-700/30'
-                    : 'text-gray-400 hover:text-white hover:bg-slate-700/20'
-                }`}
-              >
-                <tab.icon className="w-4 h-4" />
-                {tab.label}
-              </button>
-            ))}
+          <div className="flex gap-1 flex-wrap">
+            {( () => {
+              const baseTabs = [
+                { id: 'matches', label: 'Matches', icon: Flame },
+                { id: 'myBets', label: 'My Bets', icon: TrendingUp },
+                { id: 'wallet', label: 'Wallet', icon: Wallet },
+                { id: 'colorstake', label: 'ColorStake', icon: Award }
+              ];
+
+              if (user && user.isAdmin) {
+                baseTabs.push({ id: 'admin', label: 'Admin', icon: Users });
+              }
+
+              return baseTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setView(tab.id)}
+                  className={`flex items-center gap-2 px-3 sm:px-6 py-3 font-medium transition-all ${
+                    view === tab.id
+                      ? 'text-white border-b-2 border-blue-500 bg-slate-700/30'
+                      : 'text-gray-400 hover:text-white hover:bg-slate-700/20'
+                  }`}
+                >
+                  <tab.icon className="w-4 h-4" />
+                  {tab.label}
+                </button>
+              ));
+            })() }
           </div>
         </div>
       </nav>
@@ -1440,26 +1681,7 @@ const filteredMatches = matches.filter(match => {
         </div>
         
         <div className="flex items-center gap-4">
-          {lastUpdated && (
-            <div className="text-xs text-gray-400">
-              Updated: {lastUpdated.toLocaleTimeString()}
-            </div>
-          )}
-          
-          <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-            apiStatus === 'connected' 
-              ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
-              : apiStatus === 'mock'
-              ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-              : 'bg-red-500/20 text-red-400 border border-red-500/30'
-          }`}>
-            {apiStatus === 'connected' ? '✅ Live Data' : 
-             apiStatus === 'mock' ? '⚠️ Mock Data' : '🔌 Connecting...'}
-          </div>
-          
-          <div className="bg-blue-500/20 border border-blue-500/30 px-4 py-2 rounded-lg">
-            <p className="text-sm text-blue-300">API-Football • Real-time</p>
-          </div>
+          <div className="text-xs text-gray-400">Matches</div>
         </div>
       </div>
 
@@ -1473,13 +1695,7 @@ const filteredMatches = matches.filter(match => {
       )}
     </div>
 
-    {loadingMatches ? (
-      <div className="bg-slate-800/50 rounded-xl border border-blue-500/20 p-12 text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-        <p className="text-gray-400">Connecting to API-Football...</p>
-        <p className="text-gray-500 text-sm mt-2">Fetching live match data</p>
-      </div>
-    ) : filteredMatches.length === 0 ? (
+    {filteredMatches.length === 0 ? (
       <div className="bg-slate-800/50 rounded-xl border border-blue-500/20 p-12 text-center">
         <p className="text-gray-400">No matches found</p>
         <p className="text-gray-500 text-sm mt-2">Try refreshing or check back later</p>
@@ -1541,39 +1757,44 @@ const filteredMatches = matches.filter(match => {
             )}
 
             {/* Rest of your existing match display code remains the same */}
-            <div className="grid grid-cols-3 gap-3 mb-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
               {getMarketOptions(match, 'match_winner').map(option => (
-                <button
-                  key={option.id}
-                  onClick={() => !option.disabled && (setSelectedMatch(match), setSelectedOutcome(option), setSelectedMarket('match_winner'))}
-                  disabled={option.disabled}
-                  className={`${
-                    option.disabled
-                      ? 'bg-gradient-to-br from-gray-600/20 to-gray-700/20 border border-gray-500/30 opacity-60 cursor-not-allowed'
-                      : option.id === 'home'
-                      ? 'bg-gradient-to-br from-blue-600/20 to-blue-700/20 hover:from-blue-600/30 hover:to-blue-700/30 border border-blue-500/30 hover:scale-105'
-                      : 'bg-gradient-to-br from-purple-600/20 to-purple-700/20 hover:from-purple-600/30 hover:to-purple-700/30 border border-purple-500/30 hover:scale-105'
-                  } rounded-lg p-3 transition-all relative`}
-                >
-                  {/* ... rest of your existing match buttons */}
+  <button
+    key={option.id}
+    onClick={() => {
+      if (!option.disabled) {
+        setSelectedMatch(match);
+        setSelectedOutcome(option);
+        setSelectedMarket('match_winner');
+      }
+    }}
+    disabled={option.disabled}
+   
+    className={`${
+      option.disabled
+        ? 'bg-gradient-to-br from-gray-600/20 to-gray-700/20 border border-gray-500/30 opacity-60 cursor-not-allowed'
+        : option.id === 'home'
+                             ? 'bg-gradient-to-br from-blue-600/20 to-blue-700/20 hover:from-blue-600/30 hover:to-blue-700/30 border border-blue-500/30 hover:scale-105'
+        : 'bg-gradient-to-br from-purple-600/20 to-purple-700/20 hover:from-purple-600/30 hover:to-purple-700/30 border border-purple-500/30 hover:scale-105'
+    } rounded-lg p-3 transition-all relative`}
+  >
+                 <div className="text-xs font-medium mb-1 text-white">{option.label}</div>
+                 <div className="text-sm font-bold text-green-400">{option.odds ? `${option.odds}x` : 'P2P'}</div>
                 </button>
               ))}
             </div>
 
             <button
-              onClick={() => {
-                setSelectedMatch(match);
-                setShowAllMarkets(true);
-                setSelectedMarket('match_winner');
-              }}
-              className="w-full bg-gradient-to-r from-blue-600/20 to-purple-600/20 hover:from-blue-600/30 hover:to-purple-600/30 border border-blue-500/30 rounded-lg p-3 transition-all flex items-center justify-center gap-2 group"
-            >
-              <Target className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
-              <span className="text-sm font-medium text-white">More Markets</span>
-              <span className="bg-blue-500/30 text-blue-300 text-xs px-2 py-0.5 rounded-full">
-                +{MARKETS.length - 1}
-              </span>
-            </button>
+  onClick={() => {
+    setSelectedMatch(match);
+    setShowAllMarkets(true);
+    setSelectedMarket('match_winner');
+  }}
+  className="w-full bg-gradient-to-r from-blue-600/20 to-purple-600/20 hover:from-blue-600/30 hover:to-purple-600/30 border border-blue-500/30 rounded-lg p-3 transition-all flex items-center justify-center gap-2 group"
+>
+  <Target className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
+  <span className="text-sm font-medium text-white">More Markets</span>
+</button>
           </div>
         </div>
       ))
@@ -1735,7 +1956,7 @@ const filteredMatches = matches.filter(match => {
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-xl border border-blue-500/20 p-6">
+            <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6">
               <h3 className="font-bold text-white mb-4">Firebase Integration</h3>
               <p className="text-gray-400 text-sm mb-4">This app uses real Firebase Authentication and Firestore. Replace the Firebase config at the top of the code with your project credentials.</p>
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
@@ -1747,6 +1968,85 @@ const filteredMatches = matches.filter(match => {
             </div>
           </div>
         )}
+        {view === 'admin' && (
+          <div className="py-6">
+            <AdminDashboard user={user} />
+          </div>
+        )}
+        {view === 'colorstake' && (
+  <div className="py-6">
+    <ColorStake 
+      user={user}
+      onBalanceUpdate={async (newBalance) => {
+        // Update local state
+        setUser({ ...user, balance: newBalance });
+        // Update Firebase
+        await FirebaseAuthService.updateUserBalance(
+          user.uid, 
+          newBalance, 
+          user.bonus, 
+          user.withdrawableBonus
+        );
+      }}
+      onBack={() => setView('matches')}
+      onPlaceBet={async (betObj, newBalance) => {
+        // Persist ColorStake bet to Firestore so admin functions and accounting pick it up
+        if (!user) {
+          setShowAuthModal(true);
+          return;
+        }
+
+        const newBet = {
+          userId: user.uid,
+          match: betObj.match || 'ColorStake',
+          market: betObj.market || 'colorstake',
+          marketId: 'colorstake',
+          outcome: betObj.outcome,
+          outcomeId: betObj.selection,
+          amount: Number(betObj.stake || 0),
+          potentialWin: Number(betObj.potentialWin || 0),
+          timestamp: new Date().toISOString(),
+          status: betObj.status || 'pending',
+          isLive: false,
+          result: 'pending'
+        };
+
+        const betResult = await FirebaseAuthService.saveBet(newBet);
+        if (betResult.success) {
+          const betWithId = { ...newBet, id: betResult.betId };
+          setActiveBets(prev => [betWithId, ...prev]);
+          // update user balance in Firestore using the balance passed from ColorStake
+          await FirebaseAuthService.updateUserBalance(user.uid, newBalance, user.bonus, user.withdrawableBonus);
+          // return saved bet id to the caller
+          return { success: true, bet: betWithId };
+        } else {
+          console.error('Failed to save ColorStake bet', betResult.error);
+          alert('Failed to save bet. Please try again.');
+          return { success: false, error: betResult.error };
+        }
+      }}
+      onSettleBet={async (betId, status) => {
+        // allow user to settle their own ColorStake bet via callable
+        if (!user) return { success: false, error: 'Not logged in' };
+        const res = await AdminService.userSettleBet(betId, status);
+        if (res.success) {
+          // If payout, update balance for user locally
+          if (status === 'won') {
+            // fetch bet to know payout amount
+            const bet = activeBets.find(b => b.id === betId);
+            const payout = bet?.potentialWin || 0;
+            const newBal = (user.balance || 0) + Number(payout);
+            await FirebaseAuthService.updateUserBalance(user.uid, newBal, user.bonus, user.withdrawableBonus);
+            setUser({ ...user, balance: newBal });
+          }
+          // refresh bets
+          refreshUserBets();
+        }
+        return res;
+      }}
+    />
+  </div>
+)}
       </main>
 
       {showAllMarkets && selectedMatch && (
@@ -1794,18 +2094,15 @@ const filteredMatches = matches.filter(match => {
                           className={`p-4 rounded-lg border text-left transition-all ${
                             option.disabled
                               ? 'bg-gray-700/20 border-gray-600/30 opacity-50 cursor-not-allowed'
-                              : 'bg-slate-800/50 border-blue-500/30 hover:border-blue-500 hover:bg-blue-500/10 hover:scale-105'
-                          } relative`}
+                              : selectedOutcome?.id === option.id
+                              ? 'bg-blue-600/30 border-blue-500'
+                              : 'bg-slate-700/30 border-slate-600/30 hover:border-blue-500/50'
+                          }`}
                         >
-                          {option.disabled && (
-                            <div className="absolute top-2 right-2">
-                              <Lock className="w-3 h-3 text-gray-500" />
-                            </div>
-                          )}
-                          <p className={`text-sm font-medium mb-2 ${option.disabled ? 'text-gray-500' : 'text-white'}`}>
+                          <p className={`text-xs font-medium mb-1 ${option.disabled ? 'text-gray-500' : 'text-white'}`}>
                             {option.label}
                           </p>
-                          <p className={`text-xl font-bold ${option.disabled ? 'text-gray-600' : 'text-green-400'}`}>
+                          <p className={`text-sm font-bold ${option.disabled ? 'text-gray-500' : 'text-green-400'}`}>
                             {option.odds}x
                           </p>
                           {!option.disabled && option.pool && (
@@ -1818,16 +2115,6 @@ const filteredMatches = matches.filter(match => {
                 );
               })}
             </div>
-
-            <button
-              onClick={() => {
-                setShowAllMarkets(false);
-                setSelectedMatch(null);
-              }}
-              className="w-full mt-6 bg-slate-700 hover:bg-slate-600 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-            >
-              Close
-            </button>
           </div>
         </div>
       )}
@@ -1895,7 +2182,7 @@ const filteredMatches = matches.filter(match => {
               {betAmount && (
                 <p className="text-sm text-gray-400 mt-2">
                   Potential win: <span className="text-green-400 font-medium">
-                    {formatCurrency(parseFloat(betAmount) * parseFloat(selectedOutcome.odds))}
+                    {formatCurrency( Number(betAmount) /* peer-to-peer: winner gets stake back or agreed stake */ )}
                   </span>
                 </p>
               )}
@@ -1934,6 +2221,27 @@ const filteredMatches = matches.filter(match => {
           </div>
         </div>
       )}
+      {showAuthModal && <AuthModal />}
+
+      {/* Add a section to render the fetched external events */}
+      <div className="external-events max-w-4xl mx-auto px-4 py-6">
+        <h3 className="text-xl font-bold text-white mb-4">External Events</h3>
+        {externalLoading && <div>Loading events…</div>}
+        {externalError && <div style={{ color: 'red' }}>Error: {externalError}</div>}
+        {!externalLoading && !externalError && externalEvents.length === 0 && <div>No external events.</div>}
+        <ul className="space-y-3">
+          {externalEvents.map((ev, i) => (
+            <li key={ev.id || i} className="bg-slate-800/50 rounded-lg p-4 border border-blue-500/20">
+              <strong className="text-white">{ev.homeTeam || ev.home || ev.home_name} vs {ev.awayTeam || ev.away || ev.away_name}</strong>
+              <div className="text-xs text-gray-400">
+                <div>League: {ev.league || ev.competition}</div>
+                <div>Kickoff: {ev.kickoff || ev.start_time || ev.utc}</div>
+                {/* show any additional fields you need, transform as necessary */}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 };
