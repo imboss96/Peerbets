@@ -7,6 +7,7 @@ import AdminDashboard from './components/AdminDashboard';
 import AdminService from './firebase/services/adminService';
 import { getDB } from './firebase/initFirebase';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import Fly from './components/Fly';
 
 /* SurveyForm component disabled. To re-enable, restore the component definition here.
 const SurveyForm = ({ questions, onComplete, onSkip }) => { ... }
@@ -1087,39 +1088,6 @@ function App(props) {
   const [externalLoading, setExternalLoading] = React.useState(false);
   const [externalError, setExternalError] = React.useState(null);
 
-  //SURVEY QUESTIONS AND LOGIC HERE
-  const SURVEY_QUESTIONS = [
-  {
-    id: 'favorite_teams',
-    question: 'Which football teams do you support?',
-    type: 'multi-select',
-    options: ['Chelsea', 'Arsenal', 'Manchester United', 'Liverpool', 'Manchester City', 'Barcelona', 'Real Madrid', 'Bayern Munich', 'PSG', 'AC Milan']
-  },
-  {
-    id: 'betting_style',
-    question: 'What is your betting style?',
-    type: 'single',
-    options: ['Conservative (small, frequent bets)', 'Moderate (balanced approach)', 'Aggressive (high-risk, high-reward)', 'Strategic (research-based)']
-  },
-  {
-    id: 'bet_amount_range',
-    question: 'What is your typical bet amount range?',
-    type: 'single',
-    options: ['KSH 100-500', 'KSH 500-2,000', 'KSH 2,000-5,000', 'KSH 5,000+']
-  },
-  {
-    id: 'preferred_leagues',
-    question: 'Which leagues do you prefer betting on?',
-    type: 'multi-select',
-    options: ['Premier League', 'La Liga', 'Serie A', 'Bundesliga', 'Ligue 1', 'Champions League', 'Europa League', 'International Matches']
-  },
-  {
-    id: 'betting_frequency',
-    question: 'How often do you bet?',
-    type: 'single',
-    options: ['Daily', 'Weekly', 'During weekends only', 'Only big matches', 'Occasionally']
-  }
-];
 //Load user and bets on app start
 useEffect(() => {
   const loadUserAndBets = async () => {
@@ -1404,7 +1372,7 @@ const AuthModal = () => (
   async function fetchExternalEvents(params = {}) {
     // api-football v3 fixtures endpoint
     const API_URL = 'https://v3.football.api-sports.io/fixtures';
-    const API_KEY = '542516addf9ded29596b848c2693638e'; // test key you provided
+    const API_KEY = '9146330a16b5741a6c5d4e7df1af5477'; // test key you provided  remove 1 later or replace with working api key
 
     setExternalLoading(true);
     setExternalError(null);
@@ -1608,7 +1576,8 @@ const AuthModal = () => (
                 { id: 'matches', label: 'Matches', icon: Flame },
                 { id: 'myBets', label: 'My Bets', icon: TrendingUp },
                 { id: 'wallet', label: 'Wallet', icon: Wallet },
-                { id: 'colorstake', label: 'ColorStake', icon: Award }
+                { id: 'colorstake', label: 'ColorStake', icon: Award },
+                { id: 'fly', label: 'Fly Game', icon: Zap }
               ];
 
               if (user && user.isAdmin) {
@@ -2047,6 +2016,71 @@ const AuthModal = () => (
     />
   </div>
 )}
+        {view === 'fly' && (
+  <div className="py-6">
+    <Fly
+      user={user}
+      onBalanceUpdate={async (newBalance) => {
+        // Update local state
+        setUser({ ...user, balance: newBalance });
+        // Update Firebase
+        await FirebaseAuthService.updateUserBalance(
+          user.uid,
+          newBalance,
+          user.bonus,
+          user.withdrawableBonus
+        );
+      }}
+      onBack={() => setView('matches')}
+      onPlaceBet={async (betObj, newBalance) => {
+        if (!user) {
+          setShowAuthModal(true);
+          return;
+        }
+
+        const newBet = {
+          userId: user.uid,
+          match: betObj.match || 'Fly Game',
+          market: betObj.market || 'fly',
+          marketId: 'fly',
+          outcome: betObj.outcome,
+          outcomeId: betObj.selection,
+          amount: Number(betObj.stake || 0),
+          potentialWin: Number(betObj.potentialWin || 0),
+          timestamp: new Date().toISOString(),
+          status: betObj.status || 'pending',
+          isLive: false,
+          result: 'pending'
+        };
+
+        const betResult = await FirebaseAuthService.saveBet(newBet);
+        if (betResult.success) {
+          const betWithId = { ...newBet, id: betResult.betId };
+          setActiveBets(prev => [betWithId, ...prev]);
+          await FirebaseAuthService.updateUserBalance(user.uid, newBalance, user.bonus, user.withdrawableBonus);
+          return { success: true, bet: betWithId };
+        } else {
+          console.error('Failed to save Fly bet', betResult.error);
+          alert('Failed to save bet. Please try again.');
+          return { success: false, error: betResult.error };
+        }
+      }}
+      onSettleBet={async (betId, status) => {
+        if (!user) return { success: false, error: 'Not logged in' };
+        const res = await AdminService.userSettleBet(betId, status);
+        if (res.success) {
+          if (status === 'won') {
+            const bet = activeBets.find(b => b.id === betId);
+            const payout = bet?.potentialWin || 0;
+            const newBal = (user.balance || 0) + Number(payout);
+            await FirebaseAuthService.updateUserBalance(user.uid, newBal, user.bonus, user.withdrawableBonus);
+            setUser({ ...user, balance: newBal });
+          }
+        }
+      }}
+    />
+  </div>
+)}
       </main>
 
       {showAllMarkets && selectedMatch && (
@@ -2223,25 +2257,138 @@ const AuthModal = () => (
       )}
       {showAuthModal && <AuthModal />}
 
-      {/* Add a section to render the fetched external events */}
-      <div className="external-events max-w-4xl mx-auto px-4 py-6">
-        <h3 className="text-xl font-bold text-white mb-4">External Events</h3>
-        {externalLoading && <div>Loading events…</div>}
-        {externalError && <div style={{ color: 'red' }}>Error: {externalError}</div>}
-        {!externalLoading && !externalError && externalEvents.length === 0 && <div>No external events.</div>}
-        <ul className="space-y-3">
-          {externalEvents.map((ev, i) => (
-            <li key={ev.id || i} className="bg-slate-800/50 rounded-lg p-4 border border-blue-500/20">
-              <strong className="text-white">{ev.homeTeam || ev.home || ev.home_name} vs {ev.awayTeam || ev.away || ev.away_name}</strong>
-              <div className="text-xs text-gray-400">
-                <div>League: {ev.league || ev.competition}</div>
-                <div>Kickoff: {ev.kickoff || ev.start_time || ev.utc}</div>
-                {/* show any additional fields you need, transform as necessary */}
+      {/* Footer */}
+      <footer className="bg-slate-900/80 border-t border-blue-500/20 mt-12">
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+            {/* About Section */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg">
+                  <Trophy className="w-5 h-5 text-white" />
+                </div>
+                <h3 className="text-lg font-bold text-white">SparkBets</h3>
               </div>
-            </li>
-          ))}
-        </ul>
-      </div>
+              <p className="text-sm text-gray-400 mb-4">
+                Your trusted platform for live and pre-match betting. Experience the thrill of sports betting with competitive odds and instant payouts.
+              </p>
+              <div className="flex gap-3">
+                <a href="#" className="bg-slate-800/50 hover:bg-slate-700/50 p-2 rounded-lg transition-colors">
+                  <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                </a>
+                <a href="#" className="bg-slate-800/50 hover:bg-slate-700/50 p-2 rounded-lg transition-colors">
+                  <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"/></svg>
+                </a>
+                <a href="#" className="bg-slate-800/50 hover:bg-slate-700/50 p-2 rounded-lg transition-colors">
+                  <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.261 2.913-.558.788-.306 1.459-.717 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.261-2.148-.558-2.913-.306-.789-.717-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.76-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z"/></svg>
+                </a>
+              </div>
+            </div>
+
+            {/* Quick Links */}
+            <div>
+              <h4 className="text-white font-bold mb-4">Quick Links</h4>
+              <ul className="space-y-2">
+                <li><button onClick={() => setView('matches')} className="text-sm text-gray-400 hover:text-blue-400 transition-colors">Live Matches</button></li>
+                <li><button onClick={() => setView('myBets')} className="text-sm text-gray-400 hover:text-blue-400 transition-colors">My Bets</button></li>
+                <li><button onClick={() => setView('wallet')} className="text-sm text-gray-400 hover:text-blue-400 transition-colors">Wallet</button></li>
+                <li><button onClick={() => setView('colorstake')} className="text-sm text-gray-400 hover:text-blue-400 transition-colors">ColorStake Game</button></li>
+              </ul>
+            </div>
+
+            {/* Support */}
+            <div>
+              <h4 className="text-white font-bold mb-4">Support</h4>
+              <ul className="space-y-2">
+                <li>
+                  <a href="#" className="text-sm text-gray-400 hover:text-blue-400 transition-colors flex items-center gap-2">
+                    <Mail className="w-4 h-4" />
+                    support@sparkbets.ke
+                  </a>
+                </li>
+                <li>
+                  <a href="#" className="text-sm text-gray-400 hover:text-blue-400 transition-colors flex items-center gap-2">
+                    <Phone className="w-4 h-4" />
+                    +254 712 345 678
+                  </a>
+                </li>
+                <li><a href="#" className="text-sm text-gray-400 hover:text-blue-400 transition-colors">Help Center</a></li>
+                <li><a href="#" className="text-sm text-gray-400 hover:text-blue-400 transition-colors">Terms & Conditions</a></li>
+                <li><a href="#" className="text-sm text-gray-400 hover:text-blue-400 transition-colors">Privacy Policy</a></li>
+              </ul>
+            </div>
+
+            {/* Payment Methods */}
+            <div>
+              <h4 className="text-white font-bold mb-4">Payment Methods</h4>
+              <div className="space-y-3">
+                <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+                  <p className="text-xs text-gray-400 mb-2">We Accept:</p>
+                  <div className="flex flex-wrap gap-2">
+                    <div className="bg-green-600/20 border border-green-500/30 px-3 py-1 rounded">
+                      <p className="text-xs font-bold text-green-400">M-Pesa</p>
+                    </div>
+                    <div className="bg-blue-600/20 border border-blue-500/30 px-3 py-1 rounded">
+                      <p className="text-xs font-bold text-blue-400">Airtel</p>
+                    </div>
+                    <div className="bg-orange-600/20 border border-orange-500/30 px-3 py-1 rounded">
+                      <p className="text-xs font-bold text-orange-400">Visa</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                  <p className="text-xs text-yellow-300">
+                    <Award className="w-4 h-4 inline mr-1" />
+                    Licensed & Regulated
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Responsible Gambling */}
+          <div className="border-t border-slate-700/50 pt-6 mb-6">
+            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="bg-red-500/20 p-2 rounded-lg flex-shrink-0">
+                  <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h5 className="text-white font-bold mb-2">Responsible Gambling</h5>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Gambling can be addictive. Please bet responsibly. Only bet what you can afford to lose. If you or someone you know has a gambling problem, please seek help.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <a href="#" className="text-xs text-red-400 hover:text-red-300 underline">GamCare</a>
+                    <span className="text-gray-600">•</span>
+                    <a href="#" className="text-xs text-red-400 hover:text-red-300 underline">BeGambleAware</a>
+                    <span className="text-gray-600">•</span>
+                    <a href="#" className="text-xs text-red-400 hover:text-red-300 underline">18+ Only</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Bar */}
+          <div className="border-t border-slate-700/50 pt-6">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+              <p className="text-sm text-gray-400">
+                © 2025 SparkBets. All rights reserved.
+              </p>
+              <div className="flex items-center gap-4 text-xs text-gray-500">
+                <span>Version 1.0.0</span>
+                <span>•</span>
+                <span>Made in Kenya 🇰🇪</span>
+                <span>•</span>
+                <a href="#" className="hover:text-gray-400 transition-colors">Status</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };

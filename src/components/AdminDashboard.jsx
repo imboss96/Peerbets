@@ -39,22 +39,47 @@ export default function AdminDashboard({ user }) {
   const handleAddGame = async (e) => {
     e.preventDefault();
     setError('');
+    
     if (!form.homeTeam || !form.awayTeam || !form.kickoff) {
       setError('Please fill required fields');
       return;
     }
 
-    const result = await AdminService.addGame({
-      ...form,
-      status: 'upcoming',
-      createdAt: new Date().toISOString()
-    });
+    try {
+      // Validate kickoff is a valid date
+      const kickoffDate = new Date(form.kickoff);
+      if (isNaN(kickoffDate.getTime())) {
+        setError('Invalid kickoff date format. Use ISO format: 2024-12-25T15:00:00');
+        return;
+      }
 
-    if (result.success) {
-      setForm({ homeTeam: '', awayTeam: '', league: '', kickoff: '' });
-      loadData();
-    } else {
-      setError(result.error || 'Failed to add game');
+      const gameData = {
+        homeTeam: form.homeTeam.trim(),
+        awayTeam: form.awayTeam.trim(),
+        league: form.league.trim() || 'Unknown League',
+        kickoff: kickoffDate.toISOString(),
+        status: 'upcoming',
+        score: { home: 0, away: 0 },
+        homeBets: 0,
+        awayBets: 0,
+        totalPool: 0,
+        createdAt: new Date().toISOString(),
+        createdBy: user.uid
+      };
+
+      const result = await AdminService.addGame(gameData);
+
+      if (result.success) {
+        setForm({ homeTeam: '', awayTeam: '', league: '', kickoff: '' });
+        setError('');
+        await loadData();
+        alert('Game added successfully!');
+      } else {
+        setError(result.error || 'Failed to add game');
+      }
+    } catch (err) {
+      console.error('Add game error:', err);
+      setError('Error adding game: ' + err.message);
     }
   };
 
@@ -174,8 +199,25 @@ export default function AdminDashboard({ user }) {
               <input value={form.awayTeam} onChange={(e)=>setForm({...form, awayTeam:e.target.value})} placeholder="Away Team" className="px-3 py-2 rounded-lg bg-slate-900/50 text-white w-full" />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input value={form.homeTeam} onChange={(e)=>setForm({...form, homeTeam:e.target.value})} placeholder="Home Team" className="px-3 py-2 rounded-lg bg-slate-900/50 text-white w-full" />
+              <input value={form.awayTeam} onChange={(e)=>setForm({...form, awayTeam:e.target.value})} placeholder="Away Team" className="px-3 py-2 rounded-lg bg-slate-900/50 text-white w-full" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input value={form.league} onChange={(e)=>setForm({...form, league:e.target.value})} placeholder="League" className="px-3 py-2 rounded-lg bg-slate-900/50 text-white w-full" />
-              <input value={form.kickoff} onChange={(e)=>setForm({...form, kickoff:e.target.value})} placeholder="Kickoff (ISO)" className="px-3 py-2 rounded-lg bg-slate-900/50 text-white w-full" />
+              <input 
+                type="datetime-local"
+                value={form.kickoff ? form.kickoff.slice(0, 16) : ''} 
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setForm({...form, kickoff: new Date(e.target.value).toISOString()});
+                  } else {
+                    setForm({...form, kickoff: ''});
+                  }
+                }} 
+                placeholder="Kickoff Date & Time" 
+                className="px-3 py-2 rounded-lg bg-slate-900/50 text-white w-full" 
+                required
+              />
             </div>
             {error && <div className="text-sm text-red-400">{error}</div>}
             <div className="flex gap-2">

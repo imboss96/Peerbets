@@ -1,6 +1,210 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, User, TrendingUp, TrendingDown, ArrowLeft, Wallet } from 'lucide-react';
+import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
+class VirtualGameAdminService {
+  constructor() {
+    this.db = null;
+  }
+
+  async initDb() {
+    if (!this.db) {
+      this.db = getFirestore();
+    }
+    return this.db;
+  }
+
+  // Auto-complete pending virtual game bets
+  async autoCompletePendingBets(gameType) {
+    try {
+      await this.initDb();
+      const betsRef = collection(this.db, 'bets');
+      
+      // Query pending bets for specific game type
+      const q = query(
+        betsRef,
+        where('market', '==', gameType),
+        where('status', '==', 'pending')
+      );
+      
+      const snapshot = await getDocs(q);
+      let completedCount = 0;
+      const results = [];
+
+      for (const betDoc of snapshot.docs) {
+        const bet = betDoc.data();
+        const userId = bet.userId;
+
+        // Randomly determine win/loss for virtual games
+        const isWin = Math.random() > 0.5;
+        const payout = isWin ? bet.potentialWin : 0;
+        const newStatus = isWin ? 'won' : 'lost';
+
+        // Update bet status
+        await updateDoc(betDoc.ref, {
+          status: newStatus,
+          result: isWin ? 'win' : 'loss',
+          completedAt: new Date().toISOString(),
+          autoCompleted: true
+        });
+
+        // Update user balance if won
+        if (isWin && userId) {
+          const userRef = doc(this.db, 'users', userId);
+          const userSnap = await getDoc(userRef);
+          
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            const newBalance = (userData.balance || 0) + payout;
+            
+            await updateDoc(userRef, {
+              balance: newBalance,
+              lastUpdated: new Date().toISOString()
+            });
+          }
+        }
+
+        completedCount++;
+        results.push({
+          betId: betDoc.id,
+          userId,
+          status: newStatus,
+          payout: isWin ? payout : 0
+        });
+      }
+
+      // Log admin action
+      await this.logVirtualGameAction('AUTO_COMPLETE_BETS', {
+        gameType,
+        completedCount,
+        timestamp: new Date().toISOString()
+      });
+
+      return { 
+        success: true, 
+        message: `Auto-completed ${completedCount} ${gameType} bets`,
+        completedCount,
+        results
+      };
+    } catch (err) {
+      console.error('autoCompletePendingBets error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Enable/disable auto-complete for a game type
+  async setAutoCompleteConfig(gameType, enabled, completionIntervalSeconds = 30) {
+    try {
+      await this.initDb();
+      const configRef = doc(this.db, 'admin', 'virtualGameConfig');
+      
+      const currentConfig = await getDoc(configRef);
+      const config = currentConfig.exists() ? currentConfig.data() : { games: {} };
+
+      config.games = config.games || {};
+      config.games[gameType] = {
+        autoComplete: enabled,
+        completionIntervalSeconds,
+        lastUpdated: new Date().toISOString()
+      };
+
+      await setDoc(configRef, config);
+
+      return { 
+        success: true, 
+        message: `Auto-complete ${enabled ? 'enabled' : 'disabled'} for ${gameType}` 
+      };
+    } catch (err) {
+      console.error('setAutoCompleteConfig error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Get virtual game config
+  async getVirtualGameConfig() {
+    try {
+      await this.initDb();
+      const configRef = doc(this.db, 'admin', 'virtualGameConfig');
+      const configSnap = await getDoc(configRef);
+
+      if (configSnap.exists()) {
+        return { success: true, data: configSnap.data() };
+      } else {
+        const defaultConfig = {
+          games: {
+            colorstake: { autoComplete: false, completionIntervalSeconds: 30 },
+            fly: { autoComplete: false, completionIntervalSeconds: 30 }
+          },
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(configRef, defaultConfig);
+        return { success: true, data: defaultConfig };
+      }
+    } catch (err) {
+      console.error('getVirtualGameConfig error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Get stats on pending bets
+  async getPendingBetsStats(gameType) {
+    try {
+      await this.initDb();
+      const betsRef = collection(this.db, 'bets');
+      const q = query(
+        betsRef,
+        where('market', '==', gameType),
+        where('status', '==', 'pending')
+      );
+
+      const snapshot = await getDocs(q);
+      let totalStake = 0;
+      let totalPotentialWin = 0;
+
+      snapshot.forEach(doc => {
+        const bet = doc.data();
+        totalStake += bet.amount || 0;
+        totalPotentialWin += bet.potentialWin || 0;
+      });
+
+      return {
+        success: true,
+        data: {
+          gameType,
+          pendingBetsCount: snapshot.size,
+          totalStake,
+          totalPotentialWin,
+          totalRisk: totalPotentialWin - totalStake
+        }
+      };
+    } catch (err) {
+      console.error('getPendingBetsStats error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Log virtual game admin action
+  async logVirtualGameAction(action, details) {
+    try {
+      await this.initDb();
+      const logsRef = collection(this.db, 'admin/virtualGameConfig/logs');
+
+      await addDoc ? await (async () => {
+        const { addDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+        return addDoc(logsRef, {
+          action,
+          details,
+          timestamp: new Date().toISOString(),
+          serverTimestamp: serverTimestamp()
+        });
+      })() : null;
+    } catch (err) {
+      console.error('logVirtualGameAction error:', err);
+    }
+  }
+}
+
+export const virtualGameAdminService = new VirtualGameAdminService();
 export default function ColorStake({ user, onBalanceUpdate, onBack, onPlaceBet, onSettleBet }) {
   const [balance, setBalance] = useState(user?.balance || 0);
   const [bettingMode, setBettingMode] = useState('digits');
