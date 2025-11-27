@@ -81,6 +81,7 @@ const AdminDashboard = ({ user }) => {
       setAllWithdrawals(withdrawals);
       calculateWithdrawalStats(withdrawals);
     });
+    
 
     // Store unsubscribe functions
     unsubscribeRef.current = { unsubUsers, unsubBets, unsubTransactions, unsubWithdrawals };
@@ -94,6 +95,11 @@ const AdminDashboard = ({ user }) => {
     };
   }, []);
 
+  // Debug: List all collections
+  useEffect(() => {
+    AdminService.listAllCollections();
+  }, []);
+
   // Reload metrics periodically
   useEffect(() => {
     const metricsInterval = setInterval(() => {
@@ -104,58 +110,100 @@ const AdminDashboard = ({ user }) => {
   }, [dateRange]);
 
   const loadDashboardData = async () => {
-    setLoading(true);
-    try {
-      // Load metrics
-      const metricsResult = await AdminService.getDashboardMetrics(dateRange);
-      if (metricsResult.success) {
-        setDashboardMetrics(metricsResult.data);
-      }
-
-      // Load users
-      const usersResult = await AdminService.getAllUsers();
-      if (usersResult.success) {
-        setAllUsers(usersResult.users);
-      }
-
-      // Load bets
-      const betsResult = await AdminService.getAllBets(dateRange);
-      if (betsResult.success) {
-        setAllBets(betsResult.bets);
-        generateChartData(betsResult.bets);
-        generateBetDistribution(betsResult.bets);
-      }
-
-      // Load transactions
-      const transactionsResult = await AdminService.getAllTransactions(dateRange);
-      if (transactionsResult.success) {
-        setTransactions(transactionsResult.transactions);
-      }
-
-      // Load financial data
-      const financialResult = await AdminService.getFinancialData();
-      if (financialResult.success) {
-        setFinancialData(financialResult.data);
-      }
-
-      // Load system health
-      const healthResult = await AdminService.getSystemHealth();
-      if (healthResult.success) {
-        setSystemHealth(healthResult.data);
-      }
-
-      // Load withdrawals
-      const withdrawalsResult = await AdminService.getAllWithdrawals(dateRange);
-      if (withdrawalsResult.success) {
-        setAllWithdrawals(withdrawalsResult.withdrawals);
-        calculateWithdrawalStats(withdrawalsResult.withdrawals);
-      }
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-    } finally {
-      setLoading(false);
+  setLoading(true);
+  try {
+    // Load metrics
+    const metricsResult = await AdminService.getDashboardMetrics(dateRange);
+    if (metricsResult.success) {
+      setDashboardMetrics(metricsResult.data);
     }
-  };
+
+    // Load users
+    const usersResult = await AdminService.getAllUsers();
+    if (usersResult.success) {
+      setAllUsers(usersResult.users);
+    }
+
+    // Load bets
+    const betsResult = await AdminService.getAllBets(dateRange);
+    if (betsResult.success) {
+      setAllBets(betsResult.bets);
+      generateChartData(betsResult.bets);
+      generateBetDistribution(betsResult.bets);
+    }
+
+    // Load transactions directly from Firestore
+    try {
+      const { db } = await import('../firebase/config');
+      const { collection, getDocs, query, orderBy } = await import('firebase/firestore');
+      
+      const transactionsRef = collection(db, 'transactions');
+      const q = query(transactionsRef);
+      const querySnapshot = await getDocs(q);
+      
+      const txList = [];
+      querySnapshot.forEach((doc) => {
+        const txData = doc.data();
+        let timestamp;
+        
+        if (txData.timestamp && typeof txData.timestamp.toDate === 'function') {
+          timestamp = txData.timestamp.toDate().toISOString();
+        } else if (txData.timestamp) {
+          timestamp = new Date(txData.timestamp).toISOString();
+        } else if (txData.createdAt) {
+          timestamp = txData.createdAt;
+        } else {
+          timestamp = new Date().toISOString();
+        }
+        
+        txList.push({
+          id: doc.id,
+          ...txData,
+          timestamp: timestamp
+        });
+      });
+      
+      // Sort by timestamp descending
+      txList.sort((a, b) => {
+        return new Date(b.timestamp) - new Date(a.timestamp);
+      });
+      
+      setTransactions(txList);
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      setTransactions([]);
+    }
+
+    // Load financial data
+    const financialResult = await AdminService.getFinancialData();
+    if (financialResult.success) {
+      setFinancialData(financialResult.data);
+    }
+
+    // Load system health
+    const healthResult = await AdminService.getSystemHealth();
+    if (healthResult.success) {
+      setSystemHealth(healthResult.data);
+    }
+
+    // Load withdrawals
+    const withdrawalsResult = await AdminService.getAllWithdrawals(dateRange);
+    console.log('[AdminDashboard] Withdrawals result:', withdrawalsResult);
+    
+    if (withdrawalsResult.success) {
+      console.log('[AdminDashboard] Setting withdrawals:', withdrawalsResult.withdrawals);
+      setAllWithdrawals(withdrawalsResult.withdrawals || []);
+      calculateWithdrawalStats(withdrawalsResult.withdrawals || []);
+    } else {
+      console.log('[AdminDashboard] Withdrawals failed:', withdrawalsResult.error);
+      setAllWithdrawals([]);
+    }
+  } catch (error) {
+    console.error('Error loading dashboard data:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const generateChartData = (bets) => {
     const data = {};
@@ -224,6 +272,34 @@ const AdminDashboard = ({ user }) => {
     });
     setWithdrawalStats(stats);
   };
+  const calculateTransactionStats = (txList) => {
+  let totalDeposits = 0;
+  let totalWithdrawals = 0;
+  let depositCount = 0;
+  let withdrawalCount = 0;
+
+  txList.forEach(tx => {
+    const amount = Number(tx.amount) || 0;
+    const txType = tx.type?.toLowerCase();
+
+    if (txType === 'deposit') {
+      totalDeposits += amount;
+      depositCount++;
+    } else if (txType === 'withdrawal' || txType === 'withdraw') {
+      totalWithdrawals += amount;
+      withdrawalCount++;
+    }
+  });
+
+  return {
+    totalDeposits,
+    totalWithdrawals,
+    depositCount,
+    withdrawalCount,
+    netFlow: totalDeposits - totalWithdrawals
+  };
+};
+
 
   const refreshData = async () => {
     setRefreshing(true);
@@ -418,26 +494,26 @@ const AdminDashboard = ({ user }) => {
   ];
 
   // Transaction stats
-  const transactionStats = [
-    {
-      label: 'Total Deposits',
-      value: formatCurrency(dashboardMetrics?.totalDeposits || 0),
-      icon: ArrowDownLeft,
-      color: 'green'
-    },
-    {
-      label: 'Total Withdrawals',
-      value: formatCurrency(dashboardMetrics?.totalWithdrawals || 0),
-      icon: ArrowUpRight,
-      color: 'orange'
-    },
-    {
-      label: 'Net Flow',
-      value: formatCurrency((dashboardMetrics?.totalDeposits || 0) - (dashboardMetrics?.totalWithdrawals || 0)),
-      icon: CreditCard,
-      color: 'blue'
-    }
-  ];
+ const transactionStats = [
+  {
+    label: 'Total Deposits',
+    value: formatCurrency(calculateTransactionStats(transactions).totalDeposits),
+    icon: ArrowDownLeft,
+    color: 'green'
+  },
+  {
+    label: 'Total Withdrawals',
+    value: formatCurrency(calculateTransactionStats(transactions).totalWithdrawals),
+    icon: ArrowUpRight,
+    color: 'orange'
+  },
+  {
+    label: 'Net Flow',
+    value: formatCurrency(calculateTransactionStats(transactions).netFlow),
+    icon: CreditCard,
+    color: calculateTransactionStats(transactions).netFlow >= 0 ? 'blue' : 'red'
+  }
+];
 
   // Financial stats
   const financialStats = [
@@ -814,74 +890,93 @@ const AdminDashboard = ({ user }) => {
               </div>
             </div>
           )}
-
-          {/* TRANSACTIONS TAB */}
-          {activeTab === 'transactions' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                {transactionStats.map((stat, idx) => (
-                  <div key={idx} className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-gray-400 text-sm">{stat.label}</p>
-                      <div className={`bg-${stat.color}-500/20 p-2 rounded-lg`}>
-                        <stat.icon className={`w-5 h-5 text-${stat.color}-400`} />
-                      </div>
-                    </div>
-                    <p className="text-2xl font-bold text-white">{stat.value}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-900/50 border-b border-blue-500/20">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">User</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Type</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Amount</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Method</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-700/50">
-                      {transactions.slice(0, 20).map((tx, idx) => (
-                        <tr key={idx} className="hover:bg-slate-700/20 transition-colors">
-                          <td className="px-6 py-4 text-sm text-white font-medium">{tx.username}</td>
-                          <td className="px-6 py-4 text-sm">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              tx.type === 'deposit'
-                                ? 'bg-green-500/20 text-green-400'
-                                : 'bg-orange-500/20 text-orange-400'
-                            }`}>
-                              {tx.type}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-400">{formatCurrency(tx.amount)}</td>
-                          <td className="px-6 py-4 text-sm text-gray-400">{tx.method}</td>
-                          <td className="px-6 py-4 text-sm">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              tx.status === 'completed'
-                                ? 'bg-green-500/20 text-green-400'
-                                : tx.status === 'pending'
-                                ? 'bg-yellow-500/20 text-yellow-400'
-                                : 'bg-red-500/20 text-red-400'
-                            }`}>
-                              {tx.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-400">
-                            {new Date(tx.createdAt).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+{/* TRANSACTIONS TAB */}
+{activeTab === 'transactions' && (
+  <div className="space-y-4">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      {transactionStats.map((stat, idx) => (
+        <div key={idx} className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-gray-400 text-sm">{stat.label}</p>
+            <div className={`bg-${stat.color}-500/20 p-2 rounded-lg`}>
+              <stat.icon className={`w-5 h-5 text-${stat.color}-400`} />
             </div>
-          )}
+          </div>
+          <p className="text-2xl font-bold text-white">{stat.value}</p>
+        </div>
+      ))}
+    </div>
+
+    {transactions.length === 0 ? (
+      <div className="bg-slate-800/50 rounded-xl border border-blue-500/20 p-12 text-center">
+        <DollarSign className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+        <p className="text-gray-400">No transactions found</p>
+      </div>
+    ) : (
+      <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-900/50 border-b border-blue-500/20">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">User ID</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Type</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Amount</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Method</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Phone</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Transaction ID</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700/50">
+              {transactions.map((tx, idx) => (
+                <tr key={idx} className="hover:bg-slate-700/20 transition-colors">
+                  <td className="px-6 py-4 text-sm text-gray-400">{tx.userId?.substring(0, 8)}...</td>
+                  <td className="px-6 py-4 text-sm">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                      tx.type?.toLowerCase() === 'deposit'
+                        ? 'bg-green-500/20 text-green-400'
+                        : tx.type?.toLowerCase() === 'withdrawal' || tx.type?.toLowerCase() === 'withdraw'
+                        ? 'bg-orange-500/20 text-orange-400'
+                        : 'bg-blue-500/20 text-blue-400'
+                    }`}>
+                      {tx.type?.charAt(0).toUpperCase() + tx.type?.slice(1).toLowerCase()}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm font-bold">
+                    <span className={tx.type?.toLowerCase() === 'withdrawal' || tx.type?.toLowerCase() === 'withdraw' ? 'text-red-400' : 'text-green-400'}>
+                      {tx.type?.toLowerCase() === 'withdrawal' || tx.type?.toLowerCase() === 'withdraw' ? '-' : '+'}
+                      KSH {Number(tx.amount || 0).toLocaleString()}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-400 capitalize">{tx.method || 'N/A'}</td>
+                  <td className="px-6 py-4 text-sm text-gray-400">{tx.phoneNumber || 'N/A'}</td>
+                  <td className="px-6 py-4 text-sm">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                      tx.status === 'completed'
+                        ? 'bg-green-500/20 text-green-400'
+                        : tx.status === 'pending'
+                        ? 'bg-yellow-500/20 text-yellow-400'
+                        : 'bg-red-500/20 text-red-400'
+                    }`}>
+                      {tx.status?.toUpperCase() || 'PENDING'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm font-mono text-gray-400">
+                    {tx.transactionId?.substring(0, 12) || 'N/A'}...
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-400">
+                    {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : 'N/A'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )}
+  </div>
+)}
 
           {/* FINANCIAL TAB */}
           {activeTab === 'financial' && (
@@ -941,7 +1036,6 @@ const AdminDashboard = ({ user }) => {
                       </label>
                     </div>
 
-                    {/* Maintenance Mode Settings */}
                     {systemHealth?.maintenance && (
                       <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 space-y-3">
                         <input
@@ -966,7 +1060,6 @@ const AdminDashboard = ({ user }) => {
                       </div>
                     )}
 
-                    {/* Other settings */}
                     <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
                       <span className="text-gray-400">Enable 2FA</span>
                       <label className="relative inline-flex items-center cursor-pointer">
@@ -981,90 +1074,151 @@ const AdminDashboard = ({ user }) => {
           )}
 
           {/* WITHDRAWALS TAB */}
-          {activeTab === 'withdrawals' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4">
-                  <p className="text-xs text-gray-400 mb-1">Pending Withdrawals</p>
-                  <p className="text-2xl font-bold text-yellow-400">{withdrawalStats?.pendingCount || 0}</p>
-                  <p className="text-xs text-gray-500 mt-1">KSH {Number(withdrawalStats?.totalPending || 0).toLocaleString()}</p>
-                </div>
-                <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4">
-                  <p className="text-xs text-gray-400 mb-1">Completed</p>
-                  <p className="text-2xl font-bold text-green-400">{withdrawalStats?.completedCount || 0}</p>
-                  <p className="text-xs text-gray-500 mt-1">KSH {Number(withdrawalStats?.totalCompleted || 0).toLocaleString()}</p>
-                </div>
-                <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4">
-                  <p className="text-xs text-gray-400 mb-1">Failed</p>
-                  <p className="text-2xl font-bold text-red-400">{withdrawalStats?.failedCount || 0}</p>
-                  <p className="text-xs text-gray-500 mt-1">KSH {Number(withdrawalStats?.totalFailed || 0).toLocaleString()}</p>
-                </div>
-                <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4">
-                  <p className="text-xs text-gray-400 mb-1">Total Requested</p>
-                  <p className="text-2xl font-bold text-blue-400">{withdrawalStats?.totalCount || 0}</p>
-                  <p className="text-xs text-gray-500 mt-1">KSH {Number(withdrawalStats?.totalRequested || 0).toLocaleString()}</p>
-                </div>
-              </div>
+{activeTab === 'withdrawals' && (
+  <div className="space-y-4">
+    {/* DEBUG INFO */}
+    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-6">
+      <p className="text-xs text-blue-300 font-mono">
+        🔍 DEBUG: allWithdrawals.length = {allWithdrawals.length} | withdrawalStats = {JSON.stringify(withdrawalStats)}
+      </p>
+      <p className="text-xs text-blue-300 font-mono mt-2">
+        Data: {allWithdrawals.length > 0 ? JSON.stringify(allWithdrawals.slice(0, 2)) : 'No withdrawals'}
+      </p>
+    </div>
 
-              <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-900/50 border-b border-blue-500/20">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">User</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Amount</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Phone</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Date</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-700/50">
-                      {allWithdrawals.map((withdrawal) => (
-                        <tr key={withdrawal.id} className="hover:bg-slate-700/20 transition-colors">
-                          <td className="px-6 py-4 text-sm text-white font-medium">{withdrawal.username}</td>
-                          <td className="px-6 py-4 text-sm text-gray-400">KSH {Number(withdrawal.amount).toLocaleString()}</td>
-                          <td className="px-6 py-4 text-sm text-gray-400">{withdrawal.phoneNumber}</td>
-                          <td className="px-6 py-4 text-sm">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              withdrawal.status === 'pending'
-                                ? 'bg-yellow-500/20 text-yellow-400'
-                                : withdrawal.status === 'completed'
-                                ? 'bg-green-500/20 text-green-400'
-                                : 'bg-red-500/20 text-red-400'
-                            }`}>
-                              {withdrawal.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-400">
-                            {new Date(withdrawal.requestedAt).toLocaleDateString()}
-                          </td>
-                          <td className="px-6 py-4 text-sm">
-                            {withdrawal.status === 'pending' && (
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => handleApproveWithdrawal(withdrawal.id)}
-                                  className="bg-green-600/20 hover:bg-green-600/30 border border-green-500/30 text-green-400 px-3 py-1 rounded text-xs transition-colors"
-                                >
-                                  Approve
-                                </button>
-                                <button
-                                  onClick={() => handleRejectWithdrawal(withdrawal.id)}
-                                  className="bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 px-3 py-1 rounded text-xs transition-colors"
-                                >
-                                  Reject
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      {(() => {
+        let pendingCount = 0;
+        let completedCount = 0;
+        let failedCount = 0;
+        let totalPending = 0;
+        let totalCompleted = 0;
+        let totalFailed = 0;
+        let totalRequested = 0;
+
+        console.log('[AdminDashboard] Calculating withdrawal stats, allWithdrawals:', allWithdrawals);
+
+        allWithdrawals.forEach(w => {
+          const amount = Number(w.amount) || 0;
+          totalRequested += amount;
+
+          console.log('[AdminDashboard] Processing withdrawal:', { id: w.id, status: w.status, amount });
+
+          if (w.status === 'pending') {
+            pendingCount++;
+            totalPending += amount;
+          } else if (w.status === 'completed') {
+            completedCount++;
+            totalCompleted += amount;
+          } else if (w.status === 'failed') {
+            failedCount++;
+            totalFailed += amount;
+          }
+        });
+
+        console.log('[AdminDashboard] Final stats:', { pendingCount, completedCount, failedCount, totalRequested });
+
+        return (
+          <>
+            <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4 hover:border-yellow-500/40 transition-colors">
+              <p className="text-xs text-gray-400 mb-1">Pending Withdrawals</p>
+              <p className="text-2xl font-bold text-yellow-400">{pendingCount}</p>
+              <p className="text-xs text-gray-500 mt-1">KSH {Number(totalPending).toLocaleString()}</p>
             </div>
-          )}
+            <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4 hover:border-green-500/40 transition-colors">
+              <p className="text-xs text-gray-400 mb-1">Completed</p>
+              <p className="text-2xl font-bold text-green-400">{completedCount}</p>
+              <p className="text-xs text-gray-500 mt-1">KSH {Number(totalCompleted).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4 hover:border-red-500/40 transition-colors">
+              <p className="text-xs text-gray-400 mb-1">Failed</p>
+              <p className="text-2xl font-bold text-red-400">{failedCount}</p>
+              <p className="text-xs text-gray-500 mt-1">KSH {Number(totalFailed).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4 hover:border-blue-500/40 transition-colors">
+              <p className="text-xs text-gray-400 mb-1">Total Requested</p>
+              <p className="text-2xl font-bold text-blue-400">{allWithdrawals.length}</p>
+              <p className="text-xs text-gray-500 mt-1">KSH {Number(totalRequested).toLocaleString()}</p>
+            </div>
+          </>
+        );
+      })()}
+    </div>
+
+    {allWithdrawals.length === 0 ? (
+      <div className="bg-slate-800/50 rounded-xl border border-blue-500/20 p-12 text-center">
+        <Wallet className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+        <p className="text-gray-400">No withdrawals found</p>
+      </div>
+    ) : (
+      <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-900/50 border-b border-blue-500/20">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">User</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Amount</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Phone</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Requested</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-400">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700/50">
+              {allWithdrawals.map((withdrawal) => (
+                <tr key={withdrawal.id} className="hover:bg-slate-700/20 transition-colors">
+                  <td className="px-6 py-4 text-sm text-white font-medium">{withdrawal.username || 'N/A'}</td>
+                  <td className="px-6 py-4 text-sm font-bold text-orange-400">KSH {Number(withdrawal.amount || 0).toLocaleString()}</td>
+                  <td className="px-6 py-4 text-sm text-gray-400">{withdrawal.phoneNumber || 'N/A'}</td>
+                  <td className="px-6 py-4 text-sm">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                      withdrawal.status === 'pending'
+                        ? 'bg-yellow-500/20 text-yellow-400'
+                        : withdrawal.status === 'completed'
+                        ? 'bg-green-500/20 text-green-400'
+                        : withdrawal.status === 'failed'
+                        ? 'bg-red-500/20 text-red-400'
+                        : 'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {withdrawal.status?.charAt(0).toUpperCase() + withdrawal.status?.slice(1).toLowerCase()}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-400">
+                    {withdrawal.requestedAt ? new Date(withdrawal.requestedAt).toLocaleDateString() : 'N/A'}
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    {withdrawal.status === 'pending' && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleApproveWithdrawal(withdrawal.id)}
+                          className="bg-green-600/20 hover:bg-green-600/30 border border-green-500/30 text-green-400 px-3 py-1 rounded text-xs transition-colors font-bold"
+                        >
+                          ✓ Approve
+                        </button>
+                        <button
+                          onClick={() => handleRejectWithdrawal(withdrawal.id)}
+                          className="bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 px-3 py-1 rounded text-xs transition-colors font-bold"
+                        >
+                          ✗ Reject
+                        </button>
+                      </div>
+                    )}
+                    {withdrawal.status === 'completed' && (
+                      <span className="text-green-400 text-xs font-bold">✓ Completed</span>
+                    )}
+                    {withdrawal.status === 'failed' && (
+                      <span className="text-red-400 text-xs font-bold">✗ Failed</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )}
+  </div>
+)}
         </>
       )}
 

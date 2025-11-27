@@ -1107,7 +1107,8 @@ const PaymentModal = ({ user, type, onClose, onSuccess }) => {
     setStep('confirm');
   };
 
-  const handleConfirmTransaction = async () => {
+  // In PaymentModal or wherever transactions are saved
+const handleConfirmTransaction = async () => {
   setLoading(true);
   setError('');
   setStep('processing');
@@ -1121,8 +1122,8 @@ const PaymentModal = ({ user, type, onClose, onSuccess }) => {
 
     // Save transaction to Firebase
     try {
-      const { collection, addDoc, Timestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
-      const db = await import('./firebase/initFirebase').then(m => m.getDB());
+      const { addDoc, collection, Timestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase/config');
       
       await addDoc(collection(db, 'transactions'), {
         userId: user.uid,
@@ -1135,6 +1136,7 @@ const PaymentModal = ({ user, type, onClose, onSuccess }) => {
         timestamp: Timestamp.now(),
         createdAt: new Date().toISOString()
       });
+      console.log('✅ Transaction saved to Firebase');
     } catch (dbError) {
       console.error('Failed to save transaction to DB:', dbError);
     }

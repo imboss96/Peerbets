@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowUp, ArrowDown, RefreshCw, DollarSign, TrendingUp, TrendingDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, RefreshCw, DollarSign } from 'lucide-react';
 import TransactionService from '../firebase/services/transactionService';
 
 const TransactionsPage = ({ user }) => {
   const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [filter, setFilter] = useState('all');
 
@@ -13,22 +13,33 @@ const TransactionsPage = ({ user }) => {
   }, [user?.uid]);
 
   const loadTransactions = async () => {
-    if (!user?.uid) return;
+    if (!user?.uid) {
+      setLoading(false);
+      return;
+    }
     
     setLoading(true);
     
-    // Load transactions
-    const txResult = await TransactionService.getUserTransactions(user.uid);
-    if (txResult.success) {
-      setTransactions(txResult.transactions);
-    }
+    try {
+      // Load transactions
+      const txResult = await TransactionService.getUserTransactions(user.uid);
+      console.log('📊 Transactions loaded:', txResult);
+      
+      if (txResult.success) {
+        setTransactions(txResult.transactions);
+      }
 
-    // Load stats
-    const statsResult = await TransactionService.getTransactionStats(user.uid);
-    if (statsResult.success) {
-      setStats(statsResult.stats);
+      // Load stats
+      const statsResult = await TransactionService.getTransactionStats(user.uid);
+      console.log('📈 Stats loaded:', statsResult);
+      
+      if (statsResult.success) {
+        setStats(statsResult.stats);
+      }
+    } catch (error) {
+      console.error('Error loading transactions:', error);
     }
-
+    
     setLoading(false);
   };
 
@@ -39,15 +50,19 @@ const TransactionsPage = ({ user }) => {
   };
 
   const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+    } catch (e) {
+      return dateString;
+    }
   };
 
   const getTransactionIcon = (type) => {
-    switch(type) {
+    switch(type?.toLowerCase()) {
       case 'deposit':
         return <ArrowDown className="w-4 h-4 text-green-400" />;
       case 'withdrawal':
@@ -61,7 +76,7 @@ const TransactionsPage = ({ user }) => {
   };
 
   const getTransactionColor = (type) => {
-    switch(type) {
+    switch(type?.toLowerCase()) {
       case 'deposit':
         return 'bg-green-500/10 border-green-500/30';
       case 'withdrawal':
@@ -75,7 +90,7 @@ const TransactionsPage = ({ user }) => {
   };
 
   const getTransactionLabel = (type) => {
-    switch(type) {
+    switch(type?.toLowerCase()) {
       case 'deposit':
         return 'Deposit';
       case 'withdrawal':
@@ -90,13 +105,22 @@ const TransactionsPage = ({ user }) => {
 
   const filteredTransactions = filter === 'all' 
     ? transactions 
-    : transactions.filter(tx => tx.type === filter);
+    : transactions.filter(tx => tx.type?.toLowerCase() === filter?.toLowerCase());
+
+  if (loading) {
+    return (
+      <div className="bg-slate-800/50 rounded-xl border border-blue-500/20 p-12 text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+        <p className="text-gray-400">Loading transactions...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-white">💳 Transactions</h2>
+        <h2 className="text-2xl font-bold text-white">💳 Transaction History</h2>
         <button
           onClick={loadTransactions}
           disabled={loading}
@@ -170,6 +194,13 @@ const TransactionsPage = ({ user }) => {
         ))}
       </div>
 
+      {/* Debug Info */}
+      <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+        <p className="text-xs text-blue-300">
+          Debug: {filteredTransactions.length} transactions | Total: {transactions.length}
+        </p>
+      </div>
+
       {/* Transactions List */}
       {filteredTransactions.length === 0 ? (
         <div className="bg-slate-800/50 rounded-xl border border-blue-500/20 p-12 text-center">
@@ -223,11 +254,11 @@ const TransactionsPage = ({ user }) => {
                 {/* Right Side - Amount */}
                 <div className="text-right min-w-fit ml-4">
                   <p className={`text-lg font-bold ${
-                    tx.type === 'deposit' || tx.type === 'refund'
+                    tx.type?.toLowerCase() === 'deposit' || tx.type?.toLowerCase() === 'refund'
                       ? 'text-green-400'
                       : 'text-red-400'
                   }`}>
-                    {tx.type === 'deposit' || tx.type === 'refund' ? '+' : '-'}
+                    {tx.type?.toLowerCase() === 'deposit' || tx.type?.toLowerCase() === 'refund' ? '+' : '-'}
                     {formatCurrency(tx.amount)}
                   </p>
                 </div>
