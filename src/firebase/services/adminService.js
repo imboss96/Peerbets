@@ -462,6 +462,72 @@ class AdminService {
     }
   }
 
+  // Suspend user with reason
+  static async suspendUserWithReason(userId, reason) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        status: 'suspended',
+        suspendedAt: Timestamp.now(),
+        suspensionReason: reason
+      });
+      return { success: true, message: 'User suspended successfully' };
+    } catch (error) {
+      console.error('Error suspending user:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Ban user permanently
+  static async banUser(userId, reason) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        status: 'banned',
+        bannedAt: Timestamp.now(),
+        banReason: reason
+      });
+      return { success: true, message: 'User banned successfully' };
+    } catch (error) {
+      console.error('Error banning user:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Restrict user (limit certain features)
+  static async restrictUser(userId, restrictions, reason) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        status: 'restricted',
+        restrictedAt: Timestamp.now(),
+        restrictions: restrictions, // ['betting', 'withdrawal', 'deposit']
+        restrictionReason: reason
+      });
+      return { success: true, message: 'User restrictions applied' };
+    } catch (error) {
+      console.error('Error restricting user:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Prevent deleted users from logging in
+  static async deleteUserPermanently(userId, reason) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        status: 'deleted',
+        deletedAt: Timestamp.now(),
+        deletionReason: reason,
+        canLogin: false
+      });
+      return { success: true, message: 'User deleted permanently' };
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   // Settle bet
   static async settleBet(betId, result) {
     try {

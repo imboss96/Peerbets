@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, Wallet, Clock, TrendingUp, RefreshCw, Users, ChevronRight, Flame, Lock, Radio, Target, Award, Zap, LogOut, User, Mail, Phone, Eye, EyeOff, Search, Menu, X } from 'lucide-react';
+import { Trophy, Wallet, Clock, TrendingUp, RefreshCw, Users, ChevronRight, Flame, Lock, Radio, Target, Award, Zap, LogOut, User, Mail, Phone, Eye, EyeOff, Search, Menu, X, DollarSign } from 'lucide-react';
 // ApiFootballService removed — debug/live fetching disabled
 import { LEAGUE_IDS } from './services/leagueIds';
 import ColorStake from './components/ColorStake';
@@ -10,6 +10,10 @@ import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import Fly from './components/Fly';
 import BetSettlementModal from './components/BetSettlementModal';
 import BetSettlementService from './services/BetSettlementService';
+import AccountStatusService from './firebase/services/accountStatusService';
+import AccountWarningModal from './components/AccountWarningModal';
+import TransactionsPage from './components/TransactionsPage';
+
 
 /* SurveyForm component disabled. To re-enable, restore the component definition here.
 const SurveyForm = ({ questions, onComplete, onSkip }) => { ... }
@@ -818,7 +822,6 @@ const RegisterForm = ({ onRegister, onSwitchToLogin }) => {
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-3 text-gray-500 hover:text-gray-300"
                 >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
@@ -1105,33 +1108,53 @@ const PaymentModal = ({ user, type, onClose, onSuccess }) => {
   };
 
   const handleConfirmTransaction = async () => {
-    setLoading(true);
-    setError('');
-    setStep('processing');
+  setLoading(true);
+  setError('');
+  setStep('processing');
 
+  try {
+    // Simulate payment processing
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    const txId = `${isDeposit ? 'DEP' : 'WD'}-${Date.now()}`;
+    setTransactionId(txId);
+
+    // Save transaction to Firebase
     try {
-      // Simulate payment processing
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      const { collection, addDoc, Timestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+      const db = await import('./firebase/initFirebase').then(m => m.getDB());
       
-      const txId = `${isDeposit ? 'DEP' : 'WD'}-${Date.now()}`;
-      setTransactionId(txId);
-
-      setTimeout(() => {
-        if (onSuccess) {
-          onSuccess({
-            transactionId: txId,
-            amount: parseFloat(amount),
-            type
-          });
-        }
-        onClose();
-      }, 2000);
-    } catch (err) {
-      setError(err.message);
-      setStep('confirm');
-      setLoading(false);
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid,
+        type: type,
+        amount: parseFloat(amount),
+        method: paymentMethod,
+        phoneNumber: phoneNumber,
+        transactionId: txId,
+        status: 'completed',
+        timestamp: Timestamp.now(),
+        createdAt: new Date().toISOString()
+      });
+    } catch (dbError) {
+      console.error('Failed to save transaction to DB:', dbError);
     }
-  };
+
+    setTimeout(() => {
+      if (onSuccess) {
+        onSuccess({
+          transactionId: txId,
+          amount: parseFloat(amount),
+          type
+        });
+      }
+      onClose();
+    }, 2000);
+  } catch (err) {
+    setError(err.message);
+    setStep('confirm');
+    setLoading(false);
+  }
+};
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1325,19 +1348,40 @@ function App(props) {
   const [settlementLoading, setSettlementLoading] = useState(false);
   const [showSettlementModal, setShowSettlementModal] = useState(false);
   const [currentBet, setCurrentBet] = useState(null);
+  const [accountWarning, setAccountWarning] = useState(null);
+  const [walletTab, setWalletTab] = useState('balance');
+
 
   // External events state
   const [externalEvents, setExternalEvents] = React.useState([]);
   const [externalLoading, setExternalLoading] = React.useState(false);
   const [externalError, setExternalError] = React.useState(null);
 
-//Load user and bets on app start
+  //Load user and bets on app start
+  //Load user and bets on app start
 useEffect(() => {
   const loadUserAndBets = async () => {
     setLoadingBets(true);
     const currentUser = await FirebaseAuthService.getCurrentUser();
     if (currentUser) {
+      // Check account status
+      const statusCheck = await AccountStatusService.checkAccountStatus(currentUser.uid);
+
+      if (!statusCheck.canLogin) {
+        alert(`❌ ${statusCheck.message}`);
+        await FirebaseAuthService.logout();
+        setUser(null);
+        setLoadingBets(false);
+        return;
+      }
+
       setUser(currentUser);
+      
+      // Show warning if account is suspended/restricted
+      if (statusCheck.warning) {
+        setAccountWarning(statusCheck.warning);
+      }
+
       // Load user's bets from database
       const betsResult = await FirebaseAuthService.getUserBets(currentUser.uid);
       if (betsResult.success) {
@@ -1352,14 +1396,32 @@ useEffect(() => {
   loadUserAndBets();
 }, []);
 
-// Live API-Football fetching removed (debugging code). If you want live or mock matches,
-// populate `matches` from another service or a static fixture in development.
+  // Live API-Football fetching removed (debugging code). If you want live or mock matches,
+  // populate `matches` from another service or a static fixture in development.
 
   const handleLogin = async (userData) => {
   console.log('User logged in:', userData);
+  
+  // Check account status
+  const statusCheck = await AccountStatusService.checkAccountStatus(userData.uid);
+
+  if (!statusCheck.canLogin) {
+    alert(`❌ ${statusCheck.message}`);
+    await FirebaseAuthService.logout();
+    setUser(null);
+    return;
+  }
+
   setUser(userData);
+  
+  // Show warning if account is suspended/restricted
+  if (statusCheck.warning) {
+    setAccountWarning(statusCheck.warning);
+  }
+  
   setShowAuthModal(false);
-  // Load user's bets after login - UPDATE THESE LINES
+  
+  // Load user's bets after login
   const betsResult = await FirebaseAuthService.getUserBets(userData.uid);
   if (betsResult.success) {
     setActiveBets(betsResult.bets);
@@ -1733,126 +1795,126 @@ const AuthModal = () => (
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
       <header className="bg-slate-800/50 backdrop-blur-sm border-b border-blue-500/20 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setShowMobileMenu(true)}
-                  className="sm:hidden p-2 rounded-md bg-slate-700/30 hover:bg-slate-700/40 mr-1"
-                  aria-label="Open menu"
-                >
-                  <Menu className="w-5 h-5 text-white" />
-                </button>
+  <div className="max-w-7xl mx-auto px-4 py-4">
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between w-full">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowMobileMenu(true)}
+            className="sm:hidden p-2 rounded-md bg-slate-700/30 hover:bg-slate-700/40 mr-1"
+            aria-label="Open menu"
+          >
+            <Menu className="w-5 h-5 text-white" />
+          </button>
 
-                <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg flex items-center">
-                  <Trophy className="w-6 h-6 text-white" />
-                </div>
+          <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg flex items-center">
+            <Trophy className="w-6 h-6 text-white" />
+          </div>
 
-                <div className="ml-2">
-                  <h1 className="text-2xl font-bold text-white">SparkBets</h1>
-                  <p className="text-xs text-blue-300 hidden sm:block">Live & Pre-Match Betting</p>
-                </div>
-              </div>
+          <div className="ml-2">
+            <h1 className="text-2xl font-bold text-white">SparkBets</h1>
+            <p className="text-xs text-blue-300 hidden sm:block">Live & Pre-Match Betting</p>
+          </div>
+        </div>
 
-              <div className="flex items-center gap-4">
-                {/* full controls for desktop */}
-                <div className="hidden sm:flex items-center gap-4">
-                  {user ? (
-                    <>
-                      <div className="bg-slate-700/50 px-4 py-2 rounded-lg border border-blue-500/30">
-                        <div className="flex items-center gap-2">
-                          <Wallet className="w-4 h-4 text-green-400" />
-                          <div>
-                            <p className="text-xs text-gray-400">Balance</p>
-                            <p className="text-sm font-bold text-white">{formatCurrency(user.balance)}</p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="bg-slate-700/50 px-3 py-2 rounded-lg border border-blue-500/30">
-                        <p className="text-sm text-white font-medium">{user.username}</p>
-                      </div>
-                      <button
-                        onClick={handleLogout}
-                        className="bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 p-2 rounded-lg transition-colors"
-                        title="Logout"
-                      >
-                        <LogOut className="w-5 h-5 text-red-400" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => setShowAuthModal(true)}
-                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
-                      >
-                        <User className="w-4 h-4" />
-                        Login
-                      </button>
-                      <button
-                        onClick={() => {
-                          setAuthView('register');
-                          setShowAuthModal(true);
-                        }}
-                        className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg font-medium transition-colors border border-blue-500/30"
-                      >
-                        Sign Up
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {/* mobile: compact balance / login at top-right */}
-                <div className="flex items-center gap-3 sm:hidden">
-                  {user ? (
-                    <div className="bg-slate-700/50 px-3 py-2 rounded-lg border border-blue-500/30">
-                      <div className="flex items-center gap-2">
-                        <Wallet className="w-4 h-4 text-green-400" />
-                        <p className="text-sm font-bold text-white">{formatCurrency(user.balance)}</p>
-                      </div>
+        <div className="flex items-center gap-4">
+          {/* full controls for desktop */}
+          <div className="hidden sm:flex items-center gap-4">
+            {user ? (
+              <>
+                <div className="bg-slate-700/50 px-4 py-2 rounded-lg border border-blue-500/30">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-green-400" />
+                    <div>
+                      <p className="text-xs text-gray-400">Balance</p>
+                      <p className="text-sm font-bold text-white">{formatCurrency(user.balance)}</p>
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowAuthModal(true)}
-                      className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-3 py-2 rounded-lg font-medium"
-                    >
-                      <User className="w-4 h-4" />
-                    </button>
-                  )}
+                  </div>
                 </div>
-              </div>
-            </div>
+                <div className="bg-slate-700/50 px-3 py-2 rounded-lg border border-blue-500/30">
+                  <p className="text-sm text-white font-medium">{user.username}</p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 p-2 rounded-lg transition-colors"
+                  title="Logout"
+                >
+                  <LogOut className="w-5 h-5 text-red-400" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+                >
+                  <User className="w-4 h-4" />
+                  Login
+                </button>
+                <button
+                  onClick={() => {
+                    setAuthView('register');
+                    setShowAuthModal(true);
+                  }}
+                  className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg font-medium transition-colors border border-blue-500/30"
+                >
+                  Sign Up
+                </button>
+              </>
+            )}
           </div>
-        </div>
-      </header>
 
-      {showMobileMenu && (
-        <div className="fixed inset-0 z-50">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowMobileMenu(false)} />
-          <div className="absolute left-0 top-0 h-full w-64 bg-slate-800/90 border-r border-blue-500/20 p-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg">
-                  <Trophy className="w-5 h-5 text-white" />
+          {/* mobile: compact balance / login at top-right */}
+          <div className="flex items-center gap-3 sm:hidden">
+            {user ? (
+              <div className="bg-slate-700/50 px-3 py-2 rounded-lg border border-blue-500/30">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-green-400" />
+                  <p className="text-sm font-bold text-white">{formatCurrency(user.balance)}</p>
                 </div>
-                <h3 className="text-lg font-bold text-white">Menu</h3>
               </div>
-              <button onClick={() => setShowMobileMenu(false)} className="p-2 rounded-md bg-slate-700/30">
-                <X className="w-4 h-4 text-white" />
+            ) : (
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-3 py-2 rounded-lg font-medium"
+              >
+                <User className="w-4 h-4" />
               </button>
-            </div>
-
-            <div className="space-y-2">
-              <button onClick={() => { setView('myBets'); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">My Bets</button>
-              <button onClick={() => { setView('wallet'); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">Wallet</button>
-              <button onClick={() => { if (user) { setView('wallet'); } else { setAuthView('login'); setShowAuthModal(true); } setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">Profile Settings</button>
-              {user && (
-                <button onClick={() => { handleLogout(); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-red-400">Logout</button>
-              )}
-            </div>
+            )}
           </div>
         </div>
-      )}
+      </div>
+    </div>
+  </div>
+</header>
+
+        {showMobileMenu && (
+          <div className="fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowMobileMenu(false)} />
+            <div className="absolute left-0 top-0 h-full w-64 bg-slate-800/90 border-r border-blue-500/20 p-4">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg">
+                    <Trophy className="w-5 h-5 text-white" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Menu</h3>
+                </div>
+                <button onClick={() => setShowMobileMenu(false)} className="p-2 rounded-md bg-slate-700/30">
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <button onClick={() => { setView('myBets'); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">My Bets</button>
+                <button onClick={() => { setView('wallet'); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">Wallet</button>
+                <button onClick={() => { if (user) { setView('wallet'); } else { setAuthView('login'); setShowAuthModal(true); } setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-white">Profile Settings</button>
+                {user && (
+                  <button onClick={() => { handleLogout(); setShowMobileMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700/30 text-red-400">Logout</button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
       <nav className="bg-slate-800/30 backdrop-blur-sm border-b border-blue-500/10">
         <div className="max-w-7xl mx-auto px-4">
@@ -2198,50 +2260,85 @@ const AuthModal = () => (
     )}
   </div>
 )}
-        {view === 'wallet' && user && (
-          <div className="max-w-2xl">
-            <h2 className="text-2xl font-bold text-white mb-6">💰 Wallet</h2>
-            
-            <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 mb-6">
-              <p className="text-blue-100 mb-2">Available Balance</p>
-              <p className="text-4xl font-bold text-white mb-4">{formatCurrency(user?.balance || 0)}</p>
-              
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setPaymentModal({ open: true, type: 'deposit' });
-                  }}
-                  className="flex-1 bg-white text-blue-600 px-6 py-3 rounded-lg font-bold hover:bg-blue-50 transition-all"
-                >
-                  💳 Deposit
-                </button>
-                <button
-                  onClick={() => {
-                    setPaymentModal({ open: true, type: 'withdrawal' });
-                  }}
-                  className="flex-1 bg-blue-500/20 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-500/30 border border-white/20 transition-all"
-                >
-                  💸 Withdraw
-                </button>
-              </div>
-            </div>
+       {view === 'wallet' && user && (
+  <div>
+    {/* Wallet Tabs */}
+    <div className="flex gap-2 mb-6 border-b border-slate-700/50">
+      <button
+        onClick={() => setWalletTab('balance')}
+        className={`px-4 py-3 font-medium transition-colors ${
+          walletTab === 'balance'
+            ? 'text-white border-b-2 border-blue-500'
+            : 'text-gray-400 hover:text-white'
+        }`}
+      >
+        Balance & Bonus
+      </button>
+      <button
+        onClick={() => setWalletTab('transactions')}
+        className={`px-4 py-3 font-medium transition-colors ${
+          walletTab === 'transactions'
+            ? 'text-white border-b-2 border-blue-500'
+            : 'text-gray-400 hover:text-white'
+        }`}
+      >
+        Transactions
+      </button>
+    </div>
 
-            {/* Bonus Info */}
-            <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6">
-              <h3 className="text-lg font-bold text-white mb-4">Bonus & Rewards</h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
-                  <span className="text-gray-400">Active Bonus</span>
-                  <span className="font-bold text-green-400">{formatCurrency(user?.bonus || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
-                  <span className="text-gray-400">Withdrawable Bonus</span>
-                  <span className="font-bold text-blue-400">{formatCurrency(user?.withdrawableBonus || 0)}</span>
-                </div>
-              </div>
+    {/* Balance & Bonus Tab */}
+    {walletTab === 'balance' && (
+      <div className="max-w-2xl">
+        <h2 className="text-2xl font-bold text-white mb-6">💰 Wallet</h2>
+        
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 mb-6">
+          <p className="text-blue-100 mb-2">Available Balance</p>
+          <p className="text-4xl font-bold text-white mb-4">{formatCurrency(user?.balance || 0)}</p>
+          
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setPaymentModal({ open: true, type: 'deposit' });
+              }}
+              className="flex-1 bg-white text-blue-600 px-6 py-3 rounded-lg font-bold hover:bg-blue-50 transition-all"
+            >
+              💳 Deposit
+            </button>
+            <button
+              onClick={() => {
+                setPaymentModal({ open: true, type: 'withdrawal' });
+              }}
+              className="flex-1 bg-blue-500/20 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-500/30 border border-white/20 transition-all"
+            >
+              💸 Withdraw
+            </button>
+          </div>
+        </div>
+
+        {/* Bonus Info */}
+        <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6">
+          <h3 className="text-lg font-bold text-white mb-4">Bonus & Rewards</h3>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+              <span className="text-gray-400">Active Bonus</span>
+              <span className="font-bold text-green-400">{formatCurrency(user?.bonus || 0)}</span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+              <span className="text-gray-400">Withdrawable Bonus</span>
+              <span className="font-bold text-blue-400">{formatCurrency(user?.withdrawableBonus || 0)}</span>
             </div>
           </div>
-        )}
+        </div>
+      </div>
+    )}
+
+    {/* Transactions Tab */}
+    {walletTab === 'transactions' && (
+      <TransactionsPage user={user} />
+    )}
+  </div>
+)}
+
         {view === 'admin' && (
           <div className="py-6">
             <AdminDashboard user={user} />
@@ -2418,7 +2515,7 @@ const AuthModal = () => (
                       <h4 className="text-lg font-bold text-white">{market.name}</h4>
                     </div>
                     
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                       {getMarketOptions(selectedMatch, market.id).map(option => (
                         <button
                           key={option.id}
@@ -2696,20 +2793,43 @@ const AuthModal = () => (
       </footer>
 
       {paymentModal.open && (
-        <PaymentModal
-          user={user}
-          type={paymentModal.type}
-          onClose={() => setPaymentModal({ open: false, type: null })}
-          onSuccess={(data) => {
-            if (data.type === 'deposit') {
-              setUser({ ...user, balance: user.balance + data.amount });
-            } else {
-              setUser({ ...user, balance: user.balance - data.amount });
-            }
-            alert(`✅ ${data.type === 'deposit' ? 'Deposit' : 'Withdrawal'} of KSH ${data.amount} successful!\nID: ${data.transactionId}`);
-          }}
-        />
-      )}
+  <PaymentModal
+    user={user}
+    type={paymentModal.type}
+    onClose={() => setPaymentModal({ open: false, type: null })}
+    onSuccess={async (data) => {
+      // Calculate new balance
+      const newBalance = data.type === 'deposit' 
+        ? user.balance + data.amount 
+        : user.balance - data.amount;
+      
+      // Update Firebase first
+      const updateResult = await FirebaseAuthService.updateUserBalance(
+        user.uid,
+        newBalance,
+        user.bonus,
+        user.withdrawableBonus
+      );
+      
+      if (updateResult.success) {
+        // Update local state after Firebase confirms
+        setUser({ ...user, balance: newBalance });
+        alert(`✅ ${data.type === 'deposit' ? 'Deposit' : 'Withdrawal'} of KSH ${data.amount} successful!\nID: ${data.transactionId}`);
+      } else {
+        alert('❌ Failed to save transaction. Please try again.');
+      }
+    }}
+  />
+)}
+      {accountWarning && (
+  <AccountWarningModal 
+    warning={accountWarning}
+    onClose={() => {
+      setAccountWarning(null);
+      localStorage.removeItem('accountWarning');
+    }}
+  />
+)}
       {showSettlementModal && currentBet && (
         <BetSettlementModal
           bet={currentBet}
