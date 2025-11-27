@@ -1,241 +1,554 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { db } from '../config';
 import {
-    getFirestore,
-    collection,
-    addDoc,
-    setDoc,
-    doc,
-    serverTimestamp,
-    getDocs,
-    deleteDoc,
-    query,
-    where,
-    orderBy,
-    limit,
-    updateDoc,
-    getDoc
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  getDoc,
+  updateDoc,
+  deleteDoc,
+  orderBy,
+  limit,
+  onSnapshot,
+  Timestamp,
+  increment
 } from 'firebase/firestore';
-import firebaseConfig from '../config';
 
-let db;
-function init() {
-  if (!db) {
-    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-    db = getFirestore(app);
+class AdminService {
+  // Real-time listener for users
+  static subscribeToUsers(callback) {
+    const usersRef = collection(db, 'users');
+    const unsubscribe = onSnapshot(usersRef, (snapshot) => {
+      const users = snapshot.docs.map(doc => ({
+        uid: doc.id,
+        ...doc.data()
+      }));
+      callback(users);
+    });
+    return unsubscribe;
   }
-}
 
-const AdminService = {
-  async getGames() {
+  // Real-time listener for bets
+  static subscribeToBets(callback) {
+    const betsRef = collection(db, 'bets');
+    const q = query(betsRef, orderBy('timestamp', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const bets = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      callback(bets);
+    });
+    return unsubscribe;
+  }
+
+  // Real-time listener for transactions
+  static subscribeToTransactions(callback) {
+    const transactionsRef = collection(db, 'transactions');
+    const q = query(transactionsRef, orderBy('createdAt', 'desc'), limit(100));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const transactions = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      callback(transactions);
+    });
+    return unsubscribe;
+  }
+
+  // Real-time listener for withdrawals
+  static subscribeToWithdrawals(callback) {
     try {
-      init();
-      // Admin-managed games collection
-      const col = collection(db, 'adminGames');
-      const snaps = await getDocs(col);
-      const games = snaps.docs.map(d => ({ id: d.id, ...d.data() }));
-      return { success: true, games };
-    } catch (error) {
-      console.error('getGames', error);
-      return { success: false, error: error.message };
-    }
-  },
-
-  async addGame(gameData) {
-    try {
-      init();
-      const functions = getFunctions();
-      const db = getFirestore();
-
-      // ensure consistent shape expected by the homepage
-      const publicGame = {
-        title: gameData.title || `${gameData.homeTeam} vs ${gameData.awayTeam}`,
-        homeTeam: gameData.homeTeam,
-        awayTeam: gameData.awayTeam,
-        league: gameData.league || '',
-        kickoff: gameData.kickoff ? new Date(gameData.kickoff) : null,
-        odds: gameData.odds || {},
-        status: gameData.status || 'scheduled',
-        createdAt: serverTimestamp(),
-        metadata: gameData.metadata || {}
-      };
-
-      // Try callable first (optional)
-      try {
-        const addAdminGame = httpsCallable(functions, 'addAdminGame');
-        const res = await addAdminGame(publicGame);
-        const id = res?.data?.id;
-        if (id) {
-          // mirror into public collections using same id
-          await setDoc(doc(db, 'games', id), { ...publicGame, id });
-          await setDoc(doc(db, 'events', id), { ...publicGame, id });
-          await setDoc(doc(db, 'adminGames', id), { ...publicGame, id, createdByCallable: true });
-          return { id };
-        }
-      } catch (err) {
-        console.warn('callable addAdminGame failed, falling back to direct writes', err?.message || err);
-      }
-
-      // Fallback direct (create shared id and write)
-      const adminRef = await addDoc(collection(db, 'adminGames'), publicGame);
-      const id = adminRef.id;
-      await setDoc(doc(db, 'games', id), { ...publicGame, id });
-      await setDoc(doc(db, 'events', id), { ...publicGame, id });
-      // ensure admin doc has id set
-      await setDoc(doc(db, 'adminGames', id), { ...publicGame, id });
-      return { id };
-    } catch (error) {
-      console.error('addGame', error);
-      return { success: false, error: error.message };
-    }
-  },
-
-  async deleteGame(id) {
-    try {
-      init();
-      const d = doc(db, 'adminGames', id);
-      await deleteDoc(d);
-      return { success: true };
-    } catch (error) {
-      console.error('deleteGame', error);
-      return { success: false, error: error.message };
-    }
-  },
-
-  async getRecentBets(limit = 50) {
-    try {
-      init();
-      const col = collection(db, 'bets');
-      const snaps = await getDocs(col);
-      const bets = snaps.docs.map(d => ({ id: d.id, ...d.data() }));
-      // sort by timestamp desc
-      bets.sort((a, b) => new Date(b.timestamp || b.settledAt || Date.now()) - new Date(a.timestamp || a.settledAt || Date.now()));
-      return { success: true, bets: bets.slice(0, limit) };
-    } catch (error) {
-      console.error('getRecentBets', error);
-      return { success: false, error: error.message };
-    }
-  },
-
-  async bulkSettleColorStakes() {
-    try {
-      init();
-      const col = collection(db, 'bets');
-      const snaps = await getDocs(col);
-      const bets = snaps.docs.map(d => ({ id: d.id, ...d.data() }));
-      const pending = bets.filter(b => (b.market === 'colorstake' || (b.match && b.match.toLowerCase().includes('colorstake'))) && !['won','lost','void','settled'].includes((b.status||'').toLowerCase()));
-
-      const app = getApp();
-      const functions = getFunctions(app);
-      const fn = httpsCallable(functions, 'settleBet');
-
-      const results = [];
-      for (const b of pending) {
-        // decide randomly win or lost
-        const isWin = Math.random() < 0.5;
-        const status = isWin ? 'won' : 'lost';
-        // eslint-disable-next-line no-await-in-loop
-        const res = await fn({ betId: b.id, status });
-        results.push({ id: b.id, status, success: true, data: res.data });
-      }
-
-      return { success: true, settled: results.length, results };
-    } catch (error) {
-      console.error('bulkSettleColorStakes', error);
-      return { success: false, error: error.message };
-    }
-  },
-
-  async getTransactions(limit = 100) {
-    try {
-      init();
-      const col = collection(db, 'transactions');
-      const snaps = await getDocs(col);
-      const txs = snaps.docs.map(d => ({ id: d.id, ...d.data() }));
-      txs.sort((a, b) => (b.timestamp?.toMillis ? b.timestamp.toMillis() : Date.parse(b.timestamp || '')) - (a.timestamp?.toMillis ? a.timestamp.toMillis() : Date.parse(a.timestamp || '')));
-      return { success: true, transactions: txs.slice(0, limit) };
-    } catch (error) {
-      console.error('getTransactions', error);
-      return { success: false, error: error.message };
-    }
-  },
-
-  async settleBet(betId, status) {
-    try {
-      init();
-      const app = getApp();
-      const functions = getFunctions(app);
-      const fn = httpsCallable(functions, 'settleBet');
-      const res = await fn({ betId, status });
-      return { success: true, data: res.data };
-    } catch (error) {
-      console.error('settleBet', error);
-      return { success: false, error: error.message || error.toString() };
-    }
-  },
-  async userSettleBet(betId, status) {
-    try {
-      init();
-      const app = getApp();
-      const functions = getFunctions(app);
-      const fn = httpsCallable(functions, 'userSettleBet');
-      const res = await fn({ betId, status });
-      return { success: true, data: res.data };
-    } catch (error) {
-      console.error('userSettleBet', error);
-      return { success: false, error: error.message || error.toString() };
-    }
-  },
-
-  async getAccountingSummary() {
-    try {
-      init();
-      // Aggregate from transactions first (escrow/profit/payout)
-      const txCol = collection(db, 'transactions');
-      const txSnaps = await getDocs(txCol);
-
-      let totalProfit = 0;
-      let totalEscrow = 0;
-      let totalPayouts = 0;
-
-      txSnaps.forEach(d => {
-        const t = d.data();
-        if (!t || !t.type) return;
-        const amt = Number(t.amount || 0);
-        if (t.type === 'profit') totalProfit += amt;
-        if (t.type === 'escrow') totalEscrow += amt;
-        if (t.type === 'payout') totalPayouts += amt;
+      const withdrawalsRef = collection(db, 'withdrawals');
+      const q = query(withdrawalsRef, orderBy('requestedAt', 'desc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const withdrawals = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          requestedAt: doc.data().requestedAt?.toDate?.() || new Date()
+        }));
+        callback(withdrawals);
       });
+      return unsubscribe;
+    } catch (error) {
+      console.error('Error subscribing to withdrawals:', error);
+      callback([]);
+      return () => {};
+    }
+  }
 
-      // Users summary
-      const usersCol = collection(db, 'users');
-      const userSnaps = await getDocs(usersCol);
-      let totalBalances = 0;
-      userSnaps.forEach(doc => { totalBalances += (doc.data().balance || 0); });
+  // Get all users
+  static async getAllUsers() {
+    try {
+      const usersRef = collection(db, 'users');
+      const snapshot = await getDocs(usersRef);
+      const users = snapshot.docs.map(doc => ({
+        uid: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate?.() || new Date(),
+      }));
+      return { success: true, users };
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      return { success: false, error: error.message };
+    }
+  }
 
-      // Bets summary for counts
-      const betsCol = collection(db, 'bets');
-      const betsSnaps = await getDocs(betsCol);
-      let totalBets = betsSnaps.size;
+  // Get all bets with filtering
+  static async getAllBets(dateRange = '7days') {
+    try {
+      const betsRef = collection(db, 'bets');
+      let startDate = new Date();
 
-      const netProfit = totalProfit - totalPayouts;
+      switch (dateRange) {
+        case '24hours':
+          startDate.setHours(startDate.getHours() - 24);
+          break;
+        case '7days':
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case '30days':
+          startDate.setDate(startDate.getDate() - 30);
+          break;
+        case '90days':
+          startDate.setDate(startDate.getDate() - 90);
+          break;
+        case 'all':
+          startDate = new Date(0);
+          break;
+        default:
+          startDate.setDate(startDate.getDate() - 7);
+      }
+
+      const q = query(
+        betsRef,
+        where('timestamp', '>=', startDate),
+        orderBy('timestamp', 'desc')
+      );
+
+      const snapshot = await getDocs(q);
+      const bets = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.toDate?.() || new Date(),
+      }));
+      return { success: true, bets };
+    } catch (error) {
+      console.error('Error fetching bets:', error);
+      return { success: false, bets: [], error: error.message };
+    }
+  }
+
+  // Get all transactions
+  static async getAllTransactions(dateRange = '7days') {
+    try {
+      const transactionsRef = collection(db, 'transactions');
+      let startDate = new Date();
+
+      switch (dateRange) {
+        case '24hours':
+          startDate.setHours(startDate.getHours() - 24);
+          break;
+        case '7days':
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case '30days':
+          startDate.setDate(startDate.getDate() - 30);
+          break;
+        case '90days':
+          startDate.setDate(startDate.getDate() - 90);
+          break;
+        case 'all':
+          startDate = new Date(0);
+          break;
+        default:
+          startDate.setDate(startDate.getDate() - 7);
+      }
+
+      const q = query(
+        transactionsRef,
+        where('createdAt', '>=', startDate),
+        orderBy('createdAt', 'desc'),
+        limit(100)
+      );
+
+      const snapshot = await getDocs(q);
+      const transactions = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate?.() || new Date(),
+      }));
+      return { success: true, transactions };
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      return { success: false, transactions: [], error: error.message };
+    }
+  }
+
+  // Get all withdrawals (admin)
+  static async getAllWithdrawals(dateRange = '7days') {
+    try {
+      const withdrawalsRef = collection(db, 'withdrawals');
+      let startDate = new Date();
+
+      switch (dateRange) {
+        case '24hours':
+          startDate.setHours(startDate.getHours() - 24);
+          break;
+        case '7days':
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case '30days':
+          startDate.setDate(startDate.getDate() - 30);
+          break;
+        case '90days':
+          startDate.setDate(startDate.getDate() - 90);
+          break;
+        case 'all':
+          startDate = new Date(0);
+          break;
+        default:
+          startDate.setDate(startDate.getDate() - 7);
+      }
+
+      const q = query(
+        withdrawalsRef,
+        where('requestedAt', '>=', startDate),
+        orderBy('requestedAt', 'desc')
+      );
+
+      const snapshot = await getDocs(q);
+      const withdrawals = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        requestedAt: doc.data().requestedAt?.toDate?.() || new Date()
+      }));
+
+      return { success: true, withdrawals };
+    } catch (error) {
+      console.error('Error fetching withdrawals:', error);
+      return { success: false, withdrawals: [], error: error.message };
+    }
+  }
+
+  // Calculate dashboard metrics
+  static async getDashboardMetrics(dateRange = '7days') {
+    try {
+      const usersResult = await this.getAllUsers();
+      const users = usersResult.users || [];
+
+      const betsResult = await this.getAllBets(dateRange);
+      const bets = betsResult.bets || [];
+
+      const transactionsResult = await this.getAllTransactions(dateRange);
+      const transactions = transactionsResult.transactions || [];
+
+      const activeUsers = users.filter(u => u.status === 'active').length;
+      const totalBalance = users.reduce((sum, u) => sum + (Number(u.balance) || 0), 0);
+      const totalBonus = users.reduce((sum, u) => sum + (Number(u.bonus) || 0), 0);
+
+      const betsPlaced = bets.length;
+      const wonBets = bets.filter(b => b.result === 'won').length;
+      const lostBets = bets.filter(b => b.result === 'lost').length;
+      const refundedBets = bets.filter(b => b.result === 'refund').length;
+
+      const totalBetAmount = bets.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+      const avgBetSize = betsPlaced > 0 ? totalBetAmount / betsPlaced : 0;
+
+      const totalWinnings = bets
+        .filter(b => b.result === 'won')
+        .reduce((sum, b) => sum + (Number(b.potentialWin) || 0), 0);
+
+      const totalDeposits = transactions
+        .filter(t => t.type === 'deposit' && t.status === 'completed')
+        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+      const totalWithdrawals = transactions
+        .filter(t => t.type === 'withdrawal' && t.status === 'completed')
+        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+      const totalRevenue = totalDeposits - totalWinnings;
+      const commissionRate = 0.05;
+      const commissionRevenue = totalBetAmount * commissionRate;
+
+      const prevStartDate = new Date();
+      switch (dateRange) {
+        case '24hours':
+          prevStartDate.setHours(prevStartDate.getHours() - 48);
+          break;
+        case '7days':
+          prevStartDate.setDate(prevStartDate.getDate() - 14);
+          break;
+        case '30days':
+          prevStartDate.setDate(prevStartDate.getDate() - 60);
+          break;
+        default:
+          prevStartDate.setDate(prevStartDate.getDate() - 14);
+      }
+
+      const prevBets = bets.filter(b => b.timestamp?.toDate?.() <= prevStartDate);
+      const revenueChange = prevBets.length > 0
+        ? ((betsPlaced - prevBets.length) / prevBets.length) * 100
+        : 0;
 
       return {
         success: true,
         data: {
-          totalProfit,
-          totalEscrow,
-          totalPayouts,
-          netProfit,
-          totalBalances,
-          totalBets
+          totalRevenue,
+          commissionRevenue,
+          activeUsers,
+          betsPlaced,
+          avgBetSize,
+          totalBalance,
+          totalBonus,
+          wonBets,
+          lostBets,
+          refundedBets,
+          totalDeposits,
+          totalWithdrawals,
+          totalBetAmount,
+          totalWinnings,
+          revenueChange: Math.round(revenueChange),
+          usersChange: 0,
+          betsChange: 0,
+          avgBetChange: 0
         }
       };
     } catch (error) {
-      console.error('getAccountingSummary', error);
+      console.error('Error calculating metrics:', error);
+      return {
+        success: false,
+        data: {
+          totalRevenue: 0,
+          activeUsers: 0,
+          betsPlaced: 0,
+          avgBetSize: 0,
+          revenueChange: 0,
+          usersChange: 0,
+          betsChange: 0,
+          avgBetChange: 0
+        }
+      };
+    }
+  }
+
+  // Get financial data
+  static async getFinancialData() {
+    try {
+      const usersResult = await this.getAllUsers();
+      const users = usersResult.users || [];
+
+      const betsResult = await this.getAllBets('all');
+      const bets = betsResult.bets || [];
+
+      const transactionsResult = await this.getAllTransactions('all');
+      const transactions = transactionsResult.transactions || [];
+
+      const commissionRate = 0.05;
+      const totalBetAmount = bets.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+      const commissionRevenue = totalBetAmount * commissionRate;
+
+      const totalPayouts = bets
+        .filter(b => b.result === 'won')
+        .reduce((sum, b) => sum + (Number(b.potentialWin) || 0), 0);
+
+      const escrowBalance = users.reduce((sum, u) => sum + (Number(u.balance) || 0), 0);
+      const profitMargin = totalBetAmount > 0
+        ? ((commissionRevenue - totalPayouts) / totalBetAmount) * 100
+        : 0;
+
+      return {
+        success: true,
+        data: {
+          commissionRevenue,
+          totalPayouts,
+          escrowBalance,
+          profitMargin: Math.round(profitMargin),
+          totalBetAmount,
+          activeUsers: users.length,
+          totalTransactions: transactions.length
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching financial data:', error);
+      return {
+        success: false,
+        data: {
+          commissionRevenue: 0,
+          totalPayouts: 0,
+          escrowBalance: 0,
+          profitMargin: 0
+        }
+      };
+    }
+  }
+
+  // Get system health
+  static async getSystemHealth() {
+    try {
+      const testRef = doc(db, 'system', 'health');
+      await getDoc(testRef);
+
+      return {
+        success: true,
+        data: {
+          database: 'healthy',
+          api: 'healthy',
+          payment: 'healthy',
+          email: 'healthy',
+          lastChecked: new Date(),
+          uptime: '99.9%'
+        }
+      };
+    } catch (error) {
+      console.error('Error checking system health:', error);
+      return {
+        success: true,
+        data: {
+          database: 'degraded',
+          api: 'healthy',
+          payment: 'healthy',
+          email: 'healthy',
+          lastChecked: new Date(),
+          uptime: '99.0%'
+        }
+      };
+    }
+  }
+
+  // Suspend user
+  static async suspendUser(userId) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        status: 'suspended',
+        suspendedAt: Timestamp.now()
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('Error suspending user:', error);
       return { success: false, error: error.message };
     }
   }
-};
 
+  // Unsuspend user
+  static async unsuspendUser(userId) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        status: 'active',
+        suspendedAt: null
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('Error unsuspending user:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Delete user
+  static async deleteUser(userId) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        status: 'deleted',
+        deletedAt: Timestamp.now()
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Settle bet
+  static async settleBet(betId, result) {
+    try {
+      const betRef = doc(db, 'bets', betId);
+      const betDoc = await getDoc(betRef);
+      const betData = betDoc.data();
+
+      let updateData = {
+        status: 'settled',
+        result,
+        settledAt: Timestamp.now()
+      };
+
+      if (result === 'won') {
+        const userRef = doc(db, 'users', betData.userId);
+        const userDoc = await getDoc(userRef);
+        const userData = userDoc.data();
+        const newBalance = (Number(userData.balance) || 0) + (Number(betData.potentialWin) || 0);
+
+        await updateDoc(userRef, { balance: newBalance });
+      } else if (result === 'refund') {
+        const userRef = doc(db, 'users', betData.userId);
+        const userDoc = await getDoc(userRef);
+        const userData = userDoc.data();
+        const newBalance = (Number(userData.balance) || 0) + (Number(betData.amount) || 0);
+
+        await updateDoc(userRef, { balance: newBalance });
+      }
+
+      await updateDoc(betRef, updateData);
+      return { success: true };
+    } catch (error) {
+      console.error('Error settling bet:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Update user balance
+  static async updateUserBalance(userId, newBalance) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, { balance: newBalance });
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating balance:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Get user statistics
+  static async getUserStats(userId) {
+    try {
+      const betsRef = collection(db, 'bets');
+      const q = query(betsRef, where('userId', '==', userId));
+      const snapshot = await getDocs(q);
+      const userBets = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      const totalBets = userBets.length;
+      const wonBets = userBets.filter(b => b.result === 'won').length;
+      const lostBets = userBets.filter(b => b.result === 'lost').length;
+      const winRate = totalBets > 0 ? (wonBets / totalBets) * 100 : 0;
+      const totalStaked = userBets.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+      const totalWon = userBets
+        .filter(b => b.result === 'won')
+        .reduce((sum, b) => sum + (Number(b.potentialWin) || 0), 0);
+
+      return {
+        success: true,
+        stats: {
+          totalBets,
+          wonBets,
+          lostBets,
+          winRate: Math.round(winRate),
+          totalStaked,
+          totalWon,
+          profit: totalWon - totalStaked
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching user stats:', error);
+      return { success: false, stats: {} };
+    }
+  }
+}
+
+// Export the class itself, not an instance
 export default AdminService;

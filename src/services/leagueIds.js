@@ -1,0 +1,14 @@
+// src/services/leagueIds.js
+export const LEAGUE_IDS = {
+  PREMIER_LEAGUE: 39,
+  LA_LIGA: 140,
+  SERIE_A: 135,
+  BUNDESLIGA: 78,
+  LIGUE_1: 61,
+  UEFA_CHAMPIONS_LEAGUE: 2,
+  EUROPA_LEAGUE: 3,
+  AFRICA_CUP_OF_NATIONS: 6,
+  WORLD_CUP: 1
+};
+
+export default LEAGUE_IDS;

@@ -8,6 +8,8 @@ import AdminService from './firebase/services/adminService';
 import { getDB } from './firebase/initFirebase';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import Fly from './components/Fly';
+import BetSettlementModal from './components/BetSettlementModal';
+import BetSettlementService from './services/BetSettlementService';
 
 /* SurveyForm component disabled. To re-enable, restore the component definition here.
 const SurveyForm = ({ questions, onComplete, onSkip }) => { ... }
@@ -1059,6 +1061,243 @@ const ForgotPasswordForm = ({ onBack }) => {
   );
 };
 
+const PaymentModal = ({ user, type, onClose, onSuccess }) => {
+  const [step, setStep] = useState('method'); // method, amount, confirm, processing
+  const [paymentMethod, setPaymentMethod] = useState('mpesa');
+  const [amount, setAmount] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [transactionId, setTransactionId] = useState(null);
+
+  const isDeposit = type === 'deposit';
+  const title = isDeposit ? 'Deposit Funds' : 'Withdraw Funds';
+  const buttonColor = isDeposit ? 'green' : 'orange';
+
+  const paymentMethods = [
+    { id: 'mpesa', name: 'M-Pesa', icon: '📱', info: 'Instant via M-Pesa' },
+    { id: 'card', name: 'Credit/Debit Card', icon: '💳', info: 'Visa, Mastercard' },
+    { id: 'bank', name: 'Bank Transfer', icon: '🏦', info: '1-2 business days' }
+  ];
+
+  const quickAmounts = [100, 500, 1000, 5000, 10000];
+
+  const handleMethodSelect = (method) => {
+    setPaymentMethod(method);
+    setStep('amount');
+  };
+
+  const handleAmountConfirm = () => {
+    if (!amount || parseFloat(amount) <= 0) {
+      setError('Please enter a valid amount');
+      return;
+    }
+    if (isDeposit && parseFloat(amount) > 100000) {
+      setError('Maximum deposit is KSH 100,000');
+      return;
+    }
+    if (!isDeposit && parseFloat(amount) > (user?.balance || 0)) {
+      setError('Insufficient balance');
+      return;
+    }
+    setError('');
+    setStep('confirm');
+  };
+
+  const handleConfirmTransaction = async () => {
+    setLoading(true);
+    setError('');
+    setStep('processing');
+
+    try {
+      // Simulate payment processing
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      const txId = `${isDeposit ? 'DEP' : 'WD'}-${Date.now()}`;
+      setTransactionId(txId);
+
+      setTimeout(() => {
+        if (onSuccess) {
+          onSuccess({
+            transactionId: txId,
+            amount: parseFloat(amount),
+            type
+          });
+        }
+        onClose();
+      }, 2000);
+    } catch (err) {
+      setError(err.message);
+      setStep('confirm');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-900 border border-blue-500/20 rounded-xl max-w-md w-full max-h-96 overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-slate-900 border-b border-blue-500/20 p-6 flex items-center justify-between">
+          <h2 className="text-xl font-bold text-white">{title}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">
+            ✕
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-4">
+          {/* Step 1: Payment Method */}
+          {step === 'method' && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-400">Select Payment Method</p>
+              {paymentMethods.map(method => (
+                <button
+                  key={method.id}
+                  onClick={() => handleMethodSelect(method.id)}
+                  className="w-full p-4 border border-slate-700 rounded-lg hover:border-blue-500 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{method.icon}</span>
+                    <div>
+                      <p className="font-bold text-white">{method.name}</p>
+                      <p className="text-xs text-gray-400">{method.info}</p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Step 2: Amount */}
+          {step === 'amount' && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">Amount (KSH)</label>
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="Enter amount"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <p className="text-xs text-gray-400 mb-2">Quick amounts</p>
+                <div className="grid grid-cols-5 gap-2">
+                  {quickAmounts.map(quickAmount => (
+                    <button
+                      key={quickAmount}
+                      onClick={() => setAmount(quickAmount.toString())}
+                      className="p-2 bg-slate-800 hover:bg-blue-600 border border-slate-700 rounded text-sm font-medium text-white"
+                    >
+                      {quickAmount}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {paymentMethod === 'mpesa' && (
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Phone Number</label>
+                  <input
+                    type="tel"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="e.g., 0712345678"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
+
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <p className="text-sm text-red-400">{error}</p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setStep('method')}
+                  className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleAmountConfirm}
+                  className={`flex-1 px-4 py-2 bg-${buttonColor}-600 hover:bg-${buttonColor}-700 text-white rounded-lg font-medium`}
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Confirm */}
+          {step === 'confirm' && (
+            <div className="space-y-4">
+              <div className="bg-slate-800/50 rounded-lg p-4 mb-4 border border-slate-700">
+                <p className="text-sm text-gray-400 mb-1">Amount</p>
+                <p className="text-3xl font-bold text-white">KSH {parseFloat(amount).toLocaleString()}</p>
+              </div>
+
+              <div className="bg-slate-800/50 rounded-lg p-4 mb-4 border border-slate-700 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-400">Method</span>
+                  <span className="text-sm font-medium text-white capitalize">{paymentMethod}</span>
+                </div>
+                {phoneNumber && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-400">Phone</span>
+                    <span className="text-sm font-medium text-white">{phoneNumber}</span>
+                  </div>
+                )}
+              </div>
+
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <p className="text-sm text-red-400">{error}</p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setStep('amount')}
+                  className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleConfirmTransaction}
+                  disabled={loading}
+                  className={`flex-1 px-4 py-2 bg-${buttonColor}-600 hover:bg-${buttonColor}-700 disabled:opacity-50 text-white rounded-lg font-medium`}
+                >
+                  {loading ? 'Processing...' : isDeposit ? 'Deposit' : 'Withdraw'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Processing */}
+          {step === 'processing' && (
+            <div className="text-center py-8">
+              <div className="animate-spin text-4xl mb-4">💫</div>
+              <p className="text-white font-bold mb-2">Processing {isDeposit ? 'Deposit' : 'Withdrawal'}</p>
+              <p className="text-sm text-gray-400 mb-4">Please wait...</p>
+              {transactionId && (
+                <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 mt-4">
+                  <p className="text-xs text-gray-400 mb-1">Transaction ID</p>
+                  <p className="text-sm font-mono text-green-400">{transactionId}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function App(props) {
   const [user, setUser] = useState(null);
   const [authView, setAuthView] = useState('login');
@@ -1082,6 +1321,10 @@ function App(props) {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [games, setGames] = React.useState([]);
+  const [paymentModal, setPaymentModal] = useState({ open: false, type: null });
+  const [settlementLoading, setSettlementLoading] = useState(false);
+  const [showSettlementModal, setShowSettlementModal] = useState(false);
+  const [currentBet, setCurrentBet] = useState(null);
 
   // External events state
   const [externalEvents, setExternalEvents] = React.useState([]);
@@ -1270,6 +1513,49 @@ const refreshUserBets = async () => {
     }
     setLoadingBets(false);
   }
+};
+
+//Handling settle bet function
+// Add this after refreshUserBets function
+const handleSettleBet = async (betId, result) => {
+  if (!user) {
+    alert('Not logged in');
+    return;
+  }
+
+  setSettlementLoading(true);
+
+  const settleResult = await BetSettlementService.settleBet(betId, result, user.uid);
+
+  if (settleResult.success) {
+    // Track in admin financial records
+    const bet = activeBets.find(b => b.id === betId);
+    
+    if (result === 'lost') {
+      // Lost bets go to profits
+      await BetSettlementService.addToProfit(betId, bet.amount, user.uid);
+    } else if (result === 'won' || result === 'refund') {
+      // Release from escrow
+      await BetSettlementService.releaseEscrow(bet.amount);
+    }
+
+    // Update local state
+    const updatedBets = activeBets.map(b =>
+      b.id === betId 
+        ? { ...b, status: 'settled', result, settledAt: new Date().toISOString() } 
+        : b
+    );
+    setActiveBets(updatedBets);
+
+    setUser({ ...user, balance: settleResult.newBalance });
+    alert(`✅ ${settleResult.message}`);
+    setShowSettlementModal(false);
+    setCurrentBet(null);
+  } else {
+    alert('❌ Failed to settle bet: ' + settleResult.error);
+  }
+
+  setSettlementLoading(false);
 };
 
   const formatTime = (dateString) => {
@@ -1671,7 +1957,6 @@ const AuthModal = () => (
       </div>
     ) : (
       filteredMatches.map(match => (
-        // Your existing match display code here - it will work with the new data structure
         <div key={match.id} className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-blue-500/20 overflow-hidden hover:border-blue-500/40 transition-all">
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
@@ -1725,51 +2010,50 @@ const AuthModal = () => (
               </div>
             )}
 
-            {/* Rest of your existing match display code remains the same */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
               {getMarketOptions(match, 'match_winner').map(option => (
-  <button
-    key={option.id}
-    onClick={() => {
-      if (!option.disabled) {
-        setSelectedMatch(match);
-        setSelectedOutcome(option);
-        setSelectedMarket('match_winner');
-      }
-    }}
-    disabled={option.disabled}
-   
-    className={`${
-      option.disabled
-        ? 'bg-gradient-to-br from-gray-600/20 to-gray-700/20 border border-gray-500/30 opacity-60 cursor-not-allowed'
-        : option.id === 'home'
-                             ? 'bg-gradient-to-br from-blue-600/20 to-blue-700/20 hover:from-blue-600/30 hover:to-blue-700/30 border border-blue-500/30 hover:scale-105'
-        : 'bg-gradient-to-br from-purple-600/20 to-purple-700/20 hover:from-purple-600/30 hover:to-purple-700/30 border border-purple-500/30 hover:scale-105'
-    } rounded-lg p-3 transition-all relative`}
-  >
-                 <div className="text-xs font-medium mb-1 text-white">{option.label}</div>
-                 <div className="text-sm font-bold text-green-400">{option.odds ? `${option.odds}x` : 'P2P'}</div>
+                <button
+                  key={option.id}
+                  onClick={() => {
+                    if (!option.disabled) {
+                      setSelectedMatch(match);
+                      setSelectedOutcome(option);
+                      setSelectedMarket('match_winner');
+                    }
+                  }}
+                  disabled={option.disabled}
+                  className={`${
+                    option.disabled
+                      ? 'bg-gradient-to-br from-gray-600/20 to-gray-700/20 border border-gray-500/30 opacity-60 cursor-not-allowed'
+                      : option.id === 'home'
+                      ? 'bg-gradient-to-br from-blue-600/20 to-blue-700/20 hover:from-blue-600/30 hover:to-blue-700/30 border border-blue-500/30 hover:scale-105'
+                      : 'bg-gradient-to-br from-purple-600/20 to-purple-700/20 hover:from-purple-600/30 hover:to-purple-700/30 border border-purple-500/30 hover:scale-105'
+                  } rounded-lg p-3 transition-all relative`}
+                >
+                  <div className="text-xs font-medium mb-1 text-white">{option.label}</div>
+                  <div className="text-sm font-bold text-green-400">{option.odds ? `${option.odds}x` : 'P2P'}</div>
                 </button>
               ))}
             </div>
 
             <button
-  onClick={() => {
-    setSelectedMatch(match);
-    setShowAllMarkets(true);
-    setSelectedMarket('match_winner');
-  }}
-  className="w-full bg-gradient-to-r from-blue-600/20 to-purple-600/20 hover:from-blue-600/30 hover:to-purple-600/30 border border-blue-500/30 rounded-lg p-3 transition-all flex items-center justify-center gap-2 group"
->
-  <Target className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
-  <span className="text-sm font-medium text-white">More Markets</span>
-</button>
+              onClick={() => {
+                setSelectedMatch(match);
+                setShowAllMarkets(true);
+                setSelectedMarket('match_winner');
+              }}
+              className="w-full bg-gradient-to-r from-blue-600/20 to-purple-600/20 hover:from-blue-600/30 hover:to-purple-600/30 border border-blue-500/30 rounded-lg p-3 transition-all flex items-center justify-center gap-2 group"
+            >
+              <Target className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
+              <span className="text-sm font-medium text-white">More Markets</span>
+            </button>
           </div>
         </div>
       ))
     )}
   </div>
 )}
+
 {view === 'myBets' && (
   <div>
     <div className="flex items-center justify-between mb-6">
@@ -1784,7 +2068,7 @@ const AuthModal = () => (
       </button>
     </div>
 
-    {/* Debug info - you can remove this later */}
+    {/* Debug info */}
     <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-4">
       <p className="text-xs text-blue-300">
         Debug Info: {activeBets.length} bets loaded | User ID: {user?.uid?.substring(0, 8)}...
@@ -1810,129 +2094,150 @@ const AuthModal = () => (
       </div>
     ) : (
       <div className="space-y-3">
-        {activeBets.map((bet, index) => (
-          <div key={bet.id || index} className="bg-slate-800/50 rounded-lg border border-blue-500/20 p-4 hover:border-blue-500/40 transition-colors">
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                {bet.isLive && (
-                  <div className="inline-flex items-center gap-1 bg-red-500/20 border border-red-500/30 px-2 py-1 rounded-full mb-2">
-                    <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
-                    <p className="text-xs text-red-400 font-bold">LIVE BET</p>
+        {activeBets.map((bet, index) => {
+          const isSettled = bet.status === 'settled';
+          const isWon = bet.result === 'won';
+          const isLost = bet.result === 'lost';
+          const isRefunded = bet.result === 'refund';
+
+          return (
+            <div 
+              key={bet.id || index} 
+              className={`bg-slate-800/50 rounded-lg border p-4 hover:border-blue-500/40 transition-colors ${
+                isSettled 
+                  ? isWon 
+                    ? 'border-green-500/30 bg-green-500/5'
+                    : isLost
+                    ? 'border-red-500/30 bg-red-500/5'
+                    : 'border-blue-500/30 bg-blue-500/5'
+                  : 'border-yellow-500/30'
+              }`}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  {/* Status Badge */}
+                  <div className="flex items-center gap-2 mb-2">
+                    {isSettled && (
+                      <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${
+                        isWon 
+                          ? 'bg-green-500/20 text-green-400' 
+                          : isLost 
+                          ? 'bg-red-500/20 text-red-400'
+                          : 'bg-blue-500/20 text-blue-400'
+                      }`}>
+                        {isWon ? '✓ WON' : isLost ? '✗ LOST' : '↻ REFUNDED'}
+                      </div>
+                    )}
+                    {!isSettled && (
+                      <div className="px-3 py-1 rounded-full text-xs font-bold bg-yellow-500/20 text-yellow-400">
+                        ⏳ PENDING
+                      </div>
+                    )}
                   </div>
-                )}
-                <p className="font-medium text-white">{bet.match}</p>
-                <p className="text-sm text-gray-400">
-                  {bet.market}: <span className="text-blue-400 font-medium">{bet.outcome}</span>
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {bet.league} • {new Date(bet.timestamp).toLocaleDateString()} at {new Date(bet.timestamp).toLocaleTimeString()}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-400">Stake</p>
-                <p className="font-bold text-white">{formatCurrency(bet.amount)}</p>
-                <p className="text-xs text-green-400">Odds: {bet.odds}x</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Win: {formatCurrency(bet.potentialWin)}
-                </p>
-                <div className={`text-xs mt-1 px-2 py-1 rounded-full ${
-                  bet.status === 'live' ? 'bg-red-500/20 text-red-400' : 
-                  bet.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
-                  'bg-gray-500/20 text-gray-400'
-                }`}>
-                  {bet.status}
+
+                  {/* Bet Details */}
+                  <p className="font-medium text-white mb-1">{bet.match}</p>
+                  <p className="text-sm text-gray-400 mb-2">
+                    {bet.market}: <span className="text-blue-400 font-medium">{bet.outcome}</span>
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {bet.league} • {new Date(bet.timestamp).toLocaleDateString()}
+                  </p>
+                </div>
+
+                {/* Right Side - Amount Info */}
+                <div className="text-right min-w-fit ml-4">
+                  <div className="mb-3">
+                    <p className="text-xs text-gray-400 mb-1">Stake</p>
+                    <p className="font-bold text-white">{formatCurrency(bet.amount)}</p>
+                  </div>
+
+                  <div className="mb-3">
+                    <p className="text-xs text-gray-400 mb-1">Potential</p>
+                    <p className="font-bold text-green-400">{formatCurrency(bet.potentialWin)}</p>
+                  </div>
+
+                  {isSettled && isWon && (
+                    <div className="bg-green-500/20 rounded p-2 text-xs text-center">
+                      <p className="text-green-400 font-bold">+{formatCurrency(bet.potentialWin)}</p>
+                    </div>
+                  )}
+
+                  {isSettled && isLost && (
+                    <div className="bg-red-500/20 rounded p-2 text-xs text-center">
+                      <p className="text-red-400 font-bold">-{formatCurrency(bet.amount)}</p>
+                    </div>
+                  )}
+
+                  {isSettled && isRefunded && (
+                    <div className="bg-blue-500/20 rounded p-2 text-xs text-center">
+                      <p className="text-blue-400 font-bold">+{formatCurrency(bet.amount)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* Settlement Actions for Pending Bets (Admin Only) */}
+              {!isSettled && user?.isAdmin && (
+                <div className="mt-4 pt-4 border-t border-slate-700/50">
+                  <button
+                    onClick={() => {
+                      setCurrentBet(bet);
+                      setShowSettlementModal(true);
+                    }}
+                    className="w-full bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    ⚙️ Settle Bet
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     )}
   </div>
 )}
-        {view === 'wallet' && (
+        {view === 'wallet' && user && (
           <div className="max-w-2xl">
-            <h2 className="text-2xl font-bold text-white mb-6">Wallet</h2>
+            <h2 className="text-2xl font-bold text-white mb-6">💰 Wallet</h2>
             
-            <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl p-8 mb-4">
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 mb-6">
               <p className="text-blue-100 mb-2">Available Balance</p>
-              <p className="text-4xl font-bold text-white mb-4">{formatCurrency(user.balance)}</p>
+              <p className="text-4xl font-bold text-white mb-4">{formatCurrency(user?.balance || 0)}</p>
+              
               <div className="flex gap-3">
-                <button className="bg-white text-blue-600 px-6 py-2 rounded-lg font-medium hover:bg-blue-50 transition-colors">
-                  Deposit
+                <button
+                  onClick={() => {
+                    setPaymentModal({ open: true, type: 'deposit' });
+                  }}
+                  className="flex-1 bg-white text-blue-600 px-6 py-3 rounded-lg font-bold hover:bg-blue-50 transition-all"
+                >
+                  💳 Deposit
                 </button>
-                <button className="bg-blue-500/20 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-500/30 transition-colors border border-white/20">
-                  Withdraw
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div className="bg-slate-800/50 border border-yellow-500/30 rounded-xl p-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="bg-yellow-500/20 p-2 rounded-lg">
-                    <Award className="w-5 h-5 text-yellow-400" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Bonus Balance</p>
-                    <p className="text-2xl font-bold text-white">{formatCurrency(user.bonus)}</p>
-                  </div>
-                </div>
-                <p className="text-xs text-gray-400">Use for placing bets</p>
-                <div className="mt-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2">
-                  <p className="text-xs text-yellow-300">💡 Earn bonus through deposits & promotions</p>
-                </div>
-              </div>
-
-              <div className="bg-slate-800/50 border border-green-500/30 rounded-xl p-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="bg-green-500/20 p-2 rounded-lg">
-                    <Wallet className="w-5 h-5 text-green-400" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Withdrawable Bonus</p>
-                    <p className="text-2xl font-bold text-white">{formatCurrency(user.withdrawableBonus)}</p>
-                  </div>
-                </div>
-                <p className="text-xs text-gray-400">Available for withdrawal</p>
-                <button className="mt-3 w-full bg-green-600/20 hover:bg-green-600/30 border border-green-500/30 text-green-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                  Withdraw Bonus
+                <button
+                  onClick={() => {
+                    setPaymentModal({ open: true, type: 'withdrawal' });
+                  }}
+                  className="flex-1 bg-blue-500/20 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-500/30 border border-white/20 transition-all"
+                >
+                  💸 Withdraw
                 </button>
               </div>
             </div>
 
-            <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6 mb-6">
-              <h3 className="font-bold text-white mb-4">Account Summary</h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center pb-3 border-b border-slate-700">
-                  <span className="text-gray-400">Main Balance</span>
-                  <span className="font-bold text-white">{formatCurrency(user.balance)}</span>
-                </div>
-                <div className="flex justify-between items-center pb-3 border-b border-slate-700">
-                  <span className="text-gray-400">Bonus Balance</span>
-                  <span className="font-bold text-yellow-400">{formatCurrency(user.bonus)}</span>
-                </div>
-                <div className="flex justify-between items-center pb-3 border-b border-slate-700">
-                  <span className="text-gray-400">Withdrawable Bonus</span>
-                  <span className="font-bold text-green-400">{formatCurrency(user.withdrawableBonus)}</span>
-                </div>
-                <div className="flex justify-between items-center pt-2">
-                  <span className="text-white font-bold">Total Available</span>
-                  <span className="font-bold text-blue-400 text-xl">
-                    {formatCurrency(user.balance + user.bonus + user.withdrawableBonus)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
+            {/* Bonus Info */}
             <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6">
-              <h3 className="font-bold text-white mb-4">Firebase Integration</h3>
-              <p className="text-gray-400 text-sm mb-4">This app uses real Firebase Authentication and Firestore. Replace the Firebase config at the top of the code with your project credentials.</p>
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
-                <p className="text-xs text-blue-300">✅ User authentication with Firebase Auth</p>
-                <p className="text-xs text-blue-300">✅ User data stored in Firestore</p>
-                <p className="text-xs text-blue-300">✅ Password reset via OTP</p>
-                <p className="text-xs text-blue-300">✅ Real-time balance updates</p>
+              <h3 className="text-lg font-bold text-white mb-4">Bonus & Rewards</h3>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+                  <span className="text-gray-400">Active Bonus</span>
+                  <span className="font-bold text-green-400">{formatCurrency(user?.bonus || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+                  <span className="text-gray-400">Withdrawable Bonus</span>
+                  <span className="font-bold text-blue-400">{formatCurrency(user?.withdrawableBonus || 0)}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -2280,7 +2585,7 @@ const AuthModal = () => (
                   <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"/></svg>
                 </a>
                 <a href="#" className="bg-slate-800/50 hover:bg-slate-700/50 p-2 rounded-lg transition-colors">
-                  <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.261 2.913-.558.788-.306 1.459-.717 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.261-2.148-.558-2.913-.306-.789-.717-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.76-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z"/></svg>
+                  <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.261 2.913-.558.788-.306 1.459-.717 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.261-2.148-.558-2.913-.306-.789-.717-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0s-3.667.015-4.947.072C5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12zM12 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07c-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.76-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z"/></svg>
                 </a>
               </div>
             </div>
@@ -2389,6 +2694,34 @@ const AuthModal = () => (
           </div>
         </div>
       </footer>
+
+      {paymentModal.open && (
+        <PaymentModal
+          user={user}
+          type={paymentModal.type}
+          onClose={() => setPaymentModal({ open: false, type: null })}
+          onSuccess={(data) => {
+            if (data.type === 'deposit') {
+              setUser({ ...user, balance: user.balance + data.amount });
+            } else {
+              setUser({ ...user, balance: user.balance - data.amount });
+            }
+            alert(`✅ ${data.type === 'deposit' ? 'Deposit' : 'Withdrawal'} of KSH ${data.amount} successful!\nID: ${data.transactionId}`);
+          }}
+        />
+      )}
+      {showSettlementModal && currentBet && (
+        <BetSettlementModal
+          bet={currentBet}
+          user={user}
+          onSettle={handleSettleBet}
+          onClose={() => {
+            setShowSettlementModal(false);
+            setCurrentBet(null);
+          }}
+          loading={settlementLoading}
+        />
+      )}
     </div>
   );
 };

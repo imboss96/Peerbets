@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, User, TrendingUp, TrendingDown, ArrowLeft, Wallet } from 'lucide-react';
-import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  updateDoc, 
+  doc, 
+  query, 
+  where, 
+  getDocs, 
+  getDoc,
+  setDoc,
+  serverTimestamp 
+} from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 class VirtualGameAdminService {
   constructor() {
@@ -189,17 +201,18 @@ class VirtualGameAdminService {
       await this.initDb();
       const logsRef = collection(this.db, 'admin/virtualGameConfig/logs');
 
-      await addDoc ? await (async () => {
-        const { addDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
-        return addDoc(logsRef, {
+      try {
+        await addDoc(logsRef, {
           action,
           details,
           timestamp: new Date().toISOString(),
           serverTimestamp: serverTimestamp()
         });
-      })() : null;
+      } catch (err) {
+        console.error('Failed to log virtual game action:', err);
+      }
     } catch (err) {
-      console.error('logVirtualGameAction error:', err);
+      console.error('Failed to log virtual game action:', err);
     }
   }
 }
