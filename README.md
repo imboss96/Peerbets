@@ -104,3 +104,35 @@ MIT License - Educational/Demo purposes only
 ---
 
 **Built with ❤️ for sports betting enthusiasts**
+⚽ P2P Football Betting Platform
+A peer-to-peer betting platform that matches users with opposing predictions on football matches. Built with React and powered by real-time football data from API-Football.
+🌟 Features
+Core Betting Features
+
+Live Match Data - Real-time football match information from 100+ leagues worldwide
+Multiple Markets - Match winner, over/under, both teams to score, and more
+Live Betting - Place bets on matches in progress
+Match Statistics - Detailed stats, lineups, and live updates
+
+Peer-to-Peer Matching System
+
+Smart Survey - 3-step questionnaire to understand betting preferences
+Automatic Matching - Algorithm finds users with opposite predictions on the same matches
+Real-time Notifications - Get notified instantly when a betting partner is found
+Match Management - Accept, decline, or view all your matched bets
+Status Tracking - Monitor pending, waiting, and active P2P bets
+
+User Experience
+
+Responsive Design - Works seamlessly on desktop, tablet, and mobile
+Dark Theme - Eye-friendly dark mode interface
+Search & Filter - Find specific matches quickly
+Live Updates - Automatic score updates every 45 seconds
+User Dashboard - Track your betting history and statistics
+
+🚀 Getting Started
+Prerequisites
+
+Node.js (v14 or higher)
+npm or yarn
+API-Football API key (get from API-Football)

@@ -1,0 +1,189 @@
+[1mdiff --git a/BLUE.PNG b/BLUE.PNG[m
+[1mnew file mode 100644[m
+[1mindex 0000000..b6dbeb6[m
+Binary files /dev/null and b/BLUE.PNG differ
+[1mdiff --git a/Capture.PNG b/Capture.PNG[m
+[1mnew file mode 100644[m
+[1mindex 0000000..8689be2[m
+Binary files /dev/null and b/Capture.PNG differ
+[1mdiff --git a/WhatsApp Image 2025-11-24 at 19.14.04.jpeg b/WhatsApp Image 2025-11-24 at 19.14.04.jpeg[m
+[1mnew file mode 100644[m
+[1mindex 0000000..1a81d67[m
+Binary files /dev/null and b/WhatsApp Image 2025-11-24 at 19.14.04.jpeg differ
+[1mdiff --git a/change.ez b/change.ez[m
+[1mnew file mode 100644[m
+[1mindex 0000000..e69de29[m
+[1mdiff --git a/firebase.json b/firebase.json[m
+[1mnew file mode 100644[m
+[1mindex 0000000..b049c44[m
+[1m--- /dev/null[m
+[1m+++ b/firebase.json[m
+[36m@@ -0,0 +1,29 @@[m
+[32m+[m[32m{[m
+[32m+[m[32m  "functions": [[m
+[32m+[m[32m    {[m
+[32m+[m[32m      "source": "functions",[m
+[32m+[m[32m      "codebase": "default",[m
+[32m+[m[32m      "disallowLegacyRuntimeConfig": true,[m
+[32m+[m[32m      "ignore": [[m
+[32m+[m[32m        "node_modules",[m
+[32m+[m[32m        ".git",[m
+[32m+[m[32m        "firebase-debug.log",[m
+[32m+[m[32m        "firebase-debug.*.log",[m
+[32m+[m[32m        "*.local"[m
+[32m+[m[32m      ],[m
+[32m+[m[32m      "predeploy": [[m
+[32m+[m[32m        "npm --prefix \"$RESOURCE_DIR\" run lint"[m
+[32m+[m[32m      ][m
+[32m+[m[32m    }[m
+[32m+[m[32m  ],[m
+[32m+[m[32m  "emulators": {[m
+[32m+[m[32m    "functions": {[m
+[32m+[m[32m      "port": 5001[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "ui": {[m
+[32m+[m[32m      "enabled": true,[m
+[32m+[m[32m      "port": 5002[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "singleProjectMode": true[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[1mdiff --git a/functions/.eslintrc.js b/functions/.eslintrc.js[m
+[1mnew file mode 100644[m
+[1mindex 0000000..f4cb76c[m
+[1m--- /dev/null[m
+[1m+++ b/functions/.eslintrc.js[m
+[36m@@ -0,0 +1,28 @@[m
+[32m+[m[32mmodule.exports = {[m
+[32m+[m[32m  env: {[m
+[32m+[m[32m    es6: true,[m
+[32m+[m[32m    node: true,[m
+[32m+[m[32m  },[m
+[32m+[m[32m  parserOptions: {[m
+[32m+[m[32m    "ecmaVersion": 2018,[m
+[32m+[m[32m  },[m
+[32m+[m[32m  extends: [[m
+[32m+[m[32m    "eslint:recommended",[m
+[32m+[m[32m    "google",[m
+[32m+[m[32m  ],[m
+[32m+[m[32m  rules: {[m
+[32m+[m[32m    "no-restricted-globals": ["error", "name", "length"],[m
+[32m+[m[32m    "prefer-arrow-callback": "error",[m
+[32m+[m[32m    "quotes": ["error", "double", {"allowTemplateLiterals": true}],[m
+[32m+[m[32m  },[m
+[32m+[m[32m  overrides: [[m
+[32m+[m[32m    {[m
+[32m+[m[32m      files: ["**/*.spec.*"],[m
+[32m+[m[32m      env: {[m
+[32m+[m[32m        mocha: true,[m
+[32m+[m[32m      },[m
+[32m+[m[32m      rules: {},[m
+[32m+[m[32m    },[m
+[32m+[m[32m  ],[m
+[32m+[m[32m  globals: {},[m
+[32m+[m[32m};[m
+[1mdiff --git a/functions/.gitignore b/functions/.gitignore[m
+[1mnew file mode 100644[m
+[1mindex 0000000..21ee8d3[m
+[1m--- /dev/null[m
+[1m+++ b/functions/.gitignore[m
+[36m@@ -0,0 +1,2 @@[m
+[32m+[m[32mnode_modules/[m
+[32m+[m[32m*.local[m
+\ No newline at end of file[m
+[1mdiff --git a/functions/index.js b/functions/index.js[m
+[1mnew file mode 100644[m
+[1mindex 0000000..158684b[m
+[1m--- /dev/null[m
+[1m+++ b/functions/index.js[m
+[36m@@ -0,0 +1,67 @@[m
+[32m+[m[32m/**[m
+[32m+[m[32m * Import function triggers from their respective submodules:[m
+[32m+[m[32m *[m
+[32m+[m[32m * const {onCall} = require("firebase-functions/v2/https");[m
+[32m+[m[32m * const {onDocumentWritten} = require("firebase-functions/v2/firestore");[m
+[32m+[m[32m *[m
+[32m+[m[32m * See a full list of supported triggers at https://firebase.google.com/docs/functions[m
+[32m+[m[32m */[m
+[32m+[m
+[32m+[m[32mconst {setGlobalOptions} = require("firebase-functions");[m
+[32m+[m
+[32m+[m[32m// For cost control, you can set the maximum number of containers that can be[m
+[32m+[m[32m// running at the same time. This helps mitigate the impact of unexpected[m
+[32m+[m[32m// traffic spikes by instead downgrading performance. This limit is a[m
+[32m+[m[32m// per-function limit. You can override the limit for each function using the[m
+[32m+[m[32m// `maxInstances` option in the function's options, e.g.[m
+[32m+[m[32m// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.[m
+[32m+[m[32m// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1[m
+[32m+[m[32m// functions should each use functions.runWith({ maxInstances: 10 }) instead.[m
+[32m+[m[32m// In the v1 API, each function can only serve one request per container, so[m
+[32m+[m[32m// this will be the maximum concurrent request count.[m
+[32m+[m[32msetGlobalOptions({maxInstances: 10});[m
+[32m+[m
+[32m+[m[32m// Create and deploy your first functions[m
+[32m+[m[32m// https://firebase.google.com/docs/functions/get-started[m
+[32m+[m
+[32m+[m[32m/* eslint-disable */[m
+[32m+[m[32mconst admin = require('firebase-admin');[m
+[32m+[m[32mconst functions = require('firebase-functions');[m
+[32m+[m[32madmin.initializeApp();[m
+[32m+[m
+[32m+[m[32m// Fetch events via third-party API using a secret key stored in functions config or env var[m
+[32m+[m[32mexports.fetchEvents = functions.https.onCall(async (data, context) => {[m
+[32m+[m[32m  // secure: read key from functions config or process.env[m
+[32m+[m[32m  const key = (functions.config && functions.config().sportsapi && functions.config().sportsapi.key) || process.env.SPORTS_API_KEY;[m
+[32m+[m[32m  if (!key) {[m
+[32m+[m[32m    throw new functions.https.HttpsError('failed-precondition', 'Sports API key is not configured.');[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const params = data || {};[m
+[32m+[m[32m  // Example: build the third-party URL. Replace BASE_URL and query params as needed.[m
+[32m+[m[32m  const baseUrl = 'https://api.example.com/events'; // <-- REPLACE with real API URL[m
+[32m+[m[32m  const url = new URL(baseUrl);[m
+[32m+[m[32m  if (params.league) url.searchParams.set('league', params.league);[m
+[32m+[m[32m  if (params.date) url.searchParams.set('date', params.date);[m
+[32m+[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    const resp = await fetch(url.toString(), {[m
+[32m+[m[32m      headers: {[m
+[32m+[m[32m        'Authorization': `Bearer ${key}`,[m
+[32m+[m[32m        'Accept': 'application/json'[m
+[32m+[m[32m      },[m
+[32m+[m[32m      method: 'GET'[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    if (!resp.ok) {[m
+[32m+[m[32m      const text = await resp.text();[m
+[32m+[m[32m      throw new Error(`Upstream API error: ${resp.status} ${text}`);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    const payload = await resp.json();[m
+[32m+[m[32m    // Optionally transform payload to match your app schema here.[m
+[32m+[m[32m    return { events: payload };[m
+[32m+[m[32m  } catch (err) {[m
+[32m+[m[32m    throw new functions.https.HttpsError('internal', err.message || 'Fetch failed');[m
+[32m+[m[32m  }[m
+[32m+[m[32m});[m
+[1mdiff --git a/functions/package-lock.json b/functions/package-lock.json[m
+[1mnew file mode 100644[m
+[1mindex 0000000..9f2f779[m
+[1m--- /dev/null[m
+[1m+++ b/functions/package-lock.json[m
+[36m@@ -0,0 +1,7871 @@[m
+[32m+[m[32m{[m
+[32m+[m[32m  "name": "functions",[m
+[32m+[m[32m  "lockfileVersion": 3,[m
+[32m+[m[32m  "requires": true,[m
+[32m+[m[32m  "packages": {[m
+[32m+[m[32m    "": {[m
+[32m+[m[32m      "name": "functions",[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "firebase-admin": "^13.6.0",[m
+[32m+[m[32m        "firebase-functions": "^7.0.0"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "devDependencies": {[m
+[32m+[m[32m        "eslint": "^8.15.0",[m
+[32m+[m[32m        "eslint-config-google": "^0.14.0",[m
+[32m+[m[32m        "firebase-functions-test": "^3.4.1"[m
+[32m+[m[32m      },[m
+[3
