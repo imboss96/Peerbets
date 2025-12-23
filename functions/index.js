@@ -65,3 +65,27 @@ exports.fetchEvents = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('internal', err.message || 'Fetch failed');
   }
 });
+
+// In functions/index.js, change saveGameToHistory to:
+
+async saveGameToHistory() {
+  try {
+    // Store at root level, not as subcollection
+    const gameResult = {
+      gameId: this.currentGameState.gameId,
+      crashPoint: this.currentGameState.crashPoint,
+      finalMultiplier: this.currentGameState.crashPoint,
+      altitude: this.currentGameState.altitude,
+      startTime: this.currentGameState.startTime,
+      endTime: this.currentGameState.crashTime,
+      duration: this.currentGameState.crashTime - this.currentGameState.startTime,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    // Store in root-level collection
+    await db.collection('flyGameHistory').add(gameResult);
+    console.log('📊 Game saved to history');
+  } catch (error) {
+    console.error('Error saving game to history:', error);
+  }
+}

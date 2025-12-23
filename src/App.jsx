@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, Wallet, Clock, TrendingUp, RefreshCw, Users, ChevronRight, Flame, Lock, Radio, Target, Award, Zap, LogOut, User, Mail, Phone, Eye, EyeOff, Search, Menu, X, DollarSign } from 'lucide-react';
+import { Trophy, Wallet, Clock, TrendingUp, RefreshCw, Users, ChevronRight, Flame, Lock, Radio, Target, Award, Zap, LogOut, User, Mail, Phone, Eye, EyeOff, Search, Menu, X, DollarSign, Settings } from 'lucide-react';
 // ApiFootballService removed — debug/live fetching disabled
 import { LEAGUE_IDS } from './services/leagueIds';
 import ColorStake from './components/ColorStake';
@@ -13,6 +13,7 @@ import BetSettlementService from './services/BetSettlementService';
 import AccountStatusService from './firebase/services/accountStatusService';
 import AccountWarningModal from './components/AccountWarningModal';
 import TransactionsPage from './components/TransactionsPage';
+import FlyAdminDashboard from './components/FlyAdminDashboard';
 
 
 /* SurveyForm component disabled. To re-enable, restore the component definition here.
@@ -1352,6 +1353,8 @@ function App(props) {
   const [currentBet, setCurrentBet] = useState(null);
   const [accountWarning, setAccountWarning] = useState(null);
   const [walletTab, setWalletTab] = useState('balance');
+  const [showFlyAdminDashboard, setShowFlyAdminDashboard] = useState(false);
+
 
 
   // External events state
@@ -1932,22 +1935,29 @@ const AuthModal = () => (
 
               if (user && user.isAdmin) {
                 baseTabs.push({ id: 'admin', label: 'Admin', icon: Users });
+                  baseTabs.push({ id: 'flyAdmin', label: '⚙️ Fly Settings', icon: Settings });
               }
 
               return baseTabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setView(tab.id)}
-                  className={`flex items-center gap-2 px-3 sm:px-6 py-3 font-medium transition-all ${
-                    view === tab.id
-                      ? 'text-white border-b-2 border-blue-500 bg-slate-700/30'
-                      : 'text-gray-400 hover:text-white hover:bg-slate-700/20'
-                  }`}
-                >
-                  <tab.icon className="w-4 h-4" />
-                  {tab.label}
-                </button>
-              ));
+  <button
+    key={tab.id}
+    onClick={() => {
+      if (tab.id === 'flyAdmin') {
+        setShowFlyAdminDashboard(true);
+      } else {
+        setView(tab.id);
+      }
+    }}
+    className={`flex items-center gap-2 px-3 sm:px-6 py-3 font-medium transition-all ${
+      (view === tab.id || (tab.id === 'flyAdmin' && showFlyAdminDashboard))
+        ? 'text-white border-b-2 border-blue-500 bg-slate-700/30'
+        : 'text-gray-400 hover:text-white hover:bg-slate-700/20'
+    }`}
+  >
+    <tab.icon className="w-4 h-4" />
+    {tab.label}
+  </button>
+));
             })() }
           </div>
         </div>
@@ -2351,9 +2361,7 @@ const AuthModal = () => (
     <ColorStake 
       user={user}
       onBalanceUpdate={async (newBalance) => {
-        // Update local state
         setUser({ ...user, balance: newBalance });
-        // Update Firebase
         await FirebaseAuthService.updateUserBalance(
           user.uid, 
           newBalance, 
@@ -2363,7 +2371,6 @@ const AuthModal = () => (
       }}
       onBack={() => setView('matches')}
       onPlaceBet={async (betObj, newBalance) => {
-        // Persist ColorStake bet to Firestore so admin functions and accounting pick it up
         if (!user) {
           setShowAuthModal(true);
           return;
@@ -2388,9 +2395,7 @@ const AuthModal = () => (
         if (betResult.success) {
           const betWithId = { ...newBet, id: betResult.betId };
           setActiveBets(prev => [betWithId, ...prev]);
-          // update user balance in Firestore using the balance passed from ColorStake
           await FirebaseAuthService.updateUserBalance(user.uid, newBalance, user.bonus, user.withdrawableBonus);
-          // return saved bet id to the caller
           return { success: true, bet: betWithId };
         } else {
           console.error('Failed to save ColorStake bet', betResult.error);
@@ -2398,36 +2403,97 @@ const AuthModal = () => (
           return { success: false, error: betResult.error };
         }
       }}
-      onSettleBet={async (betId, status) => {
-        // allow user to settle their own ColorStake bet via callable
-        if (!user) return { success: false, error: 'Not logged in' };
-        const res = await AdminService.userSettleBet(betId, status);
-        if (res.success) {
-          // If payout, update balance for user locally
-          if (status === 'won') {
-            // fetch bet to know payout amount
-            const bet = activeBets.find(b => b.id === betId);
-            const payout = bet?.potentialWin || 0;
-            const newBal = (user.balance || 0) + Number(payout);
-            await FirebaseAuthService.updateUserBalance(user.uid, newBal, user.bonus, user.withdrawableBonus);
-            setUser({ ...user, balance: newBal });
-          }
-          // refresh bets
-          refreshUserBets();
-        }
-        return res;
-      }}
+      // In the ColorStake view section, replace onSettleBet with:
+
+// In the Fly view onSettleBet, add this after the settlement:
+
+// In the Fly view section, replace the onSettleBet callback with this:
+
+onSettleBet={async (betSettleData, newBalance) => {
+  try {
+    if (!user) {
+      return { success: false, error: 'Not logged in' };
+    }
+
+    if (!betSettleData?.betId) {
+      return { success: false, error: 'Missing bet ID' };
+    }
+
+    // Import Firestore functions properly
+    const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+    
+    // Get initialized Firebase instance
+    const { initializeApp, getApps, getApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+    const { getFirestore } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+
+    // Initialize or get existing Firebase app
+    const app = getApps().length > 0 ? getApp() : initializeApp(FIREBASE_CONFIG);
+    const db = getFirestore(app);
+
+    // Update bet document with correct field names
+    const betRef = doc(db, 'bets', betSettleData.betId);
+    await updateDoc(betRef, {
+      status: 'settled', // Always mark as settled
+      result: betSettleData.status, // 'won' or 'lost' - this is what the UI reads
+      actualWin: betSettleData.actualWin || 0,
+      profit: betSettleData.profit || 0,
+      settledAt: betSettleData.settledAt,
+      outcome: betSettleData.outcome,
+      multiplier: betSettleData.multiplier || 0,
+      updatedAt: new Date().toISOString()
+    });
+
+    // Update user balance
+    const userRef = doc(db, 'users', user.uid);
+    await updateDoc(userRef, {
+      balance: newBalance,
+      updatedAt: new Date().toISOString()
+    });
+
+    // Update local state with correct field names
+    setUser({ ...user, balance: newBalance });
+    setActiveBets(prev => 
+      prev.map(b => 
+        b.id === betSettleData.betId 
+          ? { 
+              ...b, 
+              status: 'settled',
+              result: betSettleData.status, // 'won' or 'lost'
+              actualWin: betSettleData.actualWin || 0,
+              profit: betSettleData.profit || 0,
+              settledAt: betSettleData.settledAt,
+              outcome: betSettleData.outcome,
+              multiplier: betSettleData.multiplier || 0
+            }
+          : b
+      )
+    );
+
+    console.log('✅ Fly bet auto-settled successfully:', betSettleData.betId, 'Result:', betSettleData.status);
+    return { 
+      success: true, 
+      message: 'Bet settled successfully'
+    };
+
+  } catch (error) {
+    console.error('❌ Fly settlement error:', error);
+    return { 
+      success: false, 
+      error: error.message || 'Failed to settle bet'
+    };
+  }
+}}
     />
   </div>
 )}
-        {view === 'fly' && (
+  
+
+{view === 'fly' && (
   <div className="py-6">
     <Fly
       user={user}
       onBalanceUpdate={async (newBalance) => {
-        // Update local state
         setUser({ ...user, balance: newBalance });
-        // Update Firebase
         await FirebaseAuthService.updateUserBalance(
           user.uid,
           newBalance,
@@ -2439,7 +2505,7 @@ const AuthModal = () => (
       onPlaceBet={async (betObj, newBalance) => {
         if (!user) {
           setShowAuthModal(true);
-          return;
+          return { success: false, error: 'Not logged in' };
         }
 
         const newBet = {
@@ -2462,28 +2528,86 @@ const AuthModal = () => (
           const betWithId = { ...newBet, id: betResult.betId };
           setActiveBets(prev => [betWithId, ...prev]);
           await FirebaseAuthService.updateUserBalance(user.uid, newBalance, user.bonus, user.withdrawableBonus);
-          return { success: true, bet: betWithId };
+          return { success: true, betId: betResult.betId };
         } else {
           console.error('Failed to save Fly bet', betResult.error);
-          alert('Failed to save bet. Please try again.');
           return { success: false, error: betResult.error };
         }
       }}
-      onSettleBet={async (betId, status) => {
-        if (!user) return { success: false, error: 'Not logged in' };
-        const res = await AdminService.userSettleBet(betId, status);
-        if (res.success) {
-          if (status === 'won') {
-            const bet = activeBets.find(b => b.id === betId);
-            const payout = bet?.potentialWin || 0;
-            const newBal = (user.balance || 0) + Number(payout);
-            await FirebaseAuthService.updateUserBalance(user.uid, newBal, user.bonus, user.withdrawableBonus);
-            setUser({ ...user, balance: newBal });
+      onSettleBet={async (betSettleData, newBalance) => {
+        try {
+          if (!user) {
+            return { success: false, error: 'Not logged in' };
           }
+
+          if (!betSettleData?.betId) {
+            return { success: false, error: 'Missing bet ID' };
+          }
+
+          // Import Firestore functions properly
+          const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+          
+          // Get initialized Firebase instance
+          const { initializeApp, getApps, getApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+          const { getFirestore } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+
+          // Initialize or get existing Firebase app
+          const app = getApps().length > 0 ? getApp() : initializeApp(FIREBASE_CONFIG);
+          const db = getFirestore(app);
+
+          // Update bet document - use the correct collection path
+          const betRef = doc(db, 'bets', betSettleData.betId);
+          await updateDoc(betRef, {
+            status: betSettleData.status,
+            actualWin: betSettleData.actualWin || 0,
+            profit: betSettleData.profit || 0,
+            settledAt: betSettleData.settledAt,
+            outcome: betSettleData.outcome,
+            multiplier: betSettleData.multiplier || 0,
+            updatedAt: new Date().toISOString()
+          });
+
+          // Update user balance
+          const userRef = doc(db, 'users', user.uid);
+          await updateDoc(userRef, {
+            balance: newBalance,
+            updatedAt: new Date().toISOString()
+          });
+
+          // Update local state
+          setUser({ ...user, balance: newBalance });
+          setActiveBets(prev => 
+            prev.map(b => 
+              b.id === betSettleData.betId 
+                ? { ...b, ...betSettleData, status: 'settled' }
+                : b
+            )
+          );
+
+          console.log('✅ Fly bet settled successfully:', betSettleData.betId);
+          return { 
+            success: true, 
+            message: 'Bet settled successfully'
+          };
+
+        } catch (error) {
+          console.error('❌ Fly settlement error:', error);
+          return { 
+            success: false, 
+            error: error.message || 'Failed to settle bet'
+          };
         }
       }}
     />
   </div>
+)}
+
+{showFlyAdminDashboard && (
+  <FlyAdminDashboard 
+    user={user}
+    isAdmin={user?.isAdmin}
+    onBack={() => setShowFlyAdminDashboard(false)}
+  />
 )}
       </main>
 
