@@ -189,26 +189,19 @@ class AdminService {
   // Get all withdrawals (admin)
   static async getAllWithdrawals(dateRange = 'all') {
     try {
-      const { db } = await import('../config');
-      const { collection, getDocs, query, where, orderBy, Timestamp } = await import('firebase/firestore');
-      
-      console.log('[AdminService] Attempting to fetch withdrawals with dateRange:', dateRange);
-      
+      // Use the already imported 'db' and firestore helpers (static imports)
       // Try multiple collection names
       const collectionNames = ['withdrawals', 'withdrawal_requests', 'user_withdrawals'];
       let withdrawals = [];
-      
+
       for (const collName of collectionNames) {
         try {
           const ref = collection(db, collName);
           const snapshot = await getDocs(ref);
-          console.log(`[AdminService] Collection "${collName}" found with ${snapshot.size} documents`);
-          
+
           if (snapshot.size > 0) {
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              console.log(`[AdminService] Withdrawal doc:`, { id: doc.id, ...data });
-              
+            snapshot.forEach((docSnap) => {
+              const data = docSnap.data();
               let requestedAt = data.requestedAt;
               if (requestedAt && typeof requestedAt.toDate === 'function') {
                 requestedAt = requestedAt.toDate().toISOString();
@@ -219,15 +212,15 @@ class AdminService {
               }
 
               withdrawals.push({
-                id: doc.id,
+                id: docSnap.id,
                 ...data,
-                requestedAt: requestedAt
+                requestedAt
               });
             });
             break; // Found the collection, stop searching
           }
-        } catch (error) {
-          console.log(`[AdminService] Collection "${collName}" not found or error:`, error.message);
+        } catch (err) {
+          // collection might not exist — continue to next name
           continue;
         }
       }
@@ -239,19 +232,10 @@ class AdminService {
         return dateB - dateA;
       });
 
-      console.log('[AdminService] Final withdrawals fetched:', withdrawals.length, withdrawals);
-
-      return {
-        success: true,
-        withdrawals: withdrawals
-      };
+      return { success: true, withdrawals };
     } catch (error) {
       console.error('[AdminService] Error fetching withdrawals:', error);
-      return {
-        success: false,
-        error: error.message,
-        withdrawals: []
-      };
+      return { success: false, error: error.message, withdrawals: [] };
     }
   }
 
@@ -641,9 +625,6 @@ class AdminService {
   // Add this debug method to AdminService:
   static async listAllCollections() {
     try {
-      const { db } = await import('../config');
-      const { collection, getDocs } = await import('firebase/firestore');
-      
       // List some common collections
       const commonCollections = ['users', 'bets', 'transactions', 'withdrawals', 'withdrawal_requests', 'user_withdrawals', 'deposits'];
       
@@ -658,7 +639,7 @@ class AdminService {
             const firstDoc = snapshot.docs[0];
             console.log(`   Sample doc:`, firstDoc.data());
           }
-        } catch (error) {
+        } catch (err) {
           console.log(`❌ Collection "${collName}": Not found or error`);
         }
       }

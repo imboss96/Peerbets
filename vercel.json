@@ -20,5 +20,9 @@
   ],
   "env": {
     "GENERATE_SOURCEMAP": "false"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build"
   }
 }

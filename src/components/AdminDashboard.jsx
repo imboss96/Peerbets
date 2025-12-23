@@ -14,6 +14,8 @@ import {
 import AdminService from '../firebase/services/adminService';
 import MaintenanceService from '../firebase/services/maintenanceService';
 import WithdrawalService from '../firebase/services/withdrawalService';
+import { db } from '../firebase/config';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
 const AdminDashboard = ({ user }) => {
   // Dashboard State
@@ -134,16 +136,13 @@ const AdminDashboard = ({ user }) => {
 
     // Load transactions directly from Firestore
     try {
-      const { db } = await import('../firebase/config');
-      const { collection, getDocs, query, orderBy } = await import('firebase/firestore');
-      
       const transactionsRef = collection(db, 'transactions');
-      const q = query(transactionsRef);
+      const q = query(transactionsRef, orderBy('createdAt', 'desc'));
       const querySnapshot = await getDocs(q);
       
       const txList = [];
-      querySnapshot.forEach((doc) => {
-        const txData = doc.data();
+      querySnapshot.forEach((docSnap) => {
+        const txData = docSnap.data();
         let timestamp;
         
         if (txData.timestamp && typeof txData.timestamp.toDate === 'function') {
@@ -157,17 +156,14 @@ const AdminDashboard = ({ user }) => {
         }
         
         txList.push({
-          id: doc.id,
+          id: docSnap.id,
           ...txData,
           timestamp: timestamp
         });
       });
       
-      // Sort by timestamp descending
-      txList.sort((a, b) => {
-        return new Date(b.timestamp) - new Date(a.timestamp);
-      });
-      
+      // Sort by timestamp descending (redundant with orderBy but safe)
+      txList.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       setTransactions(txList);
     } catch (error) {
       console.error('Error fetching transactions:', error);
