@@ -217,47 +217,16 @@ class FirebaseAuthService {
     }
   }
 
-  // Mock OTP verification
+  // Firebase Phone OTP verification
   static async verifyOTP(phoneNumber, otp) {
     try {
-      await this.initialize();
+      const { verifyOTPCode } = await import('./firebase/config.js');
+      const result = await verifyOTPCode(otp);
       
-      // Mock OTP verification - in production, integrate with SMS service
-      // For demo purposes, any 6-digit code starting with '1' will work
-      if (otp.length === 6 && otp.startsWith('1')) {
-        // Find user by phone number
-        const { collection, query, where, getDocs } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
-        
-        const usersQuery = query(
-          collection(this.firebaseDb, 'users'),
-          where('phoneNumber', '==', phoneNumber)
-        );
-        
-        const querySnapshot = await getDocs(usersQuery);
-        
-        if (!querySnapshot.empty) {
-          const userDoc = querySnapshot.docs[0];
-          const userData = userDoc.data();
-          
-          // Sign in the user properly
-          const email = this.generateEmailFromPhone(phoneNumber);
-          const { getAuth, signInWithEmailAndPassword } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
-          const auth = getAuth();
-          
-          // For OTP login, we need to have a password - in real app, use Firebase Phone Auth
-          // For demo, we'll use a default password
-          try {
-            await signInWithEmailAndPassword(auth, email, 'otp123456');
-          } catch (authError) {
-            console.log('Auth sign in attempted for OTP login');
-          }
-          
-          return { success: true, user: userData };
-        } else {
-          return { success: false, error: 'No account found with this phone number' };
-        }
+      if (result.success) {
+        return { success: true, user: result.user };
       } else {
-        return { success: false, error: 'Invalid OTP code. Use any code starting with 1 for demo' };
+        return { success: false, error: result.error };
       }
     } catch (error) {
       console.error('OTP verification error:', error);
@@ -265,21 +234,21 @@ class FirebaseAuthService {
     }
   }
 
-  // Mock OTP sending
+  // Firebase Phone OTP sending
   static async sendOTP(phoneNumber) {
     try {
-      // In production, integrate with SMS service like Africa's Talking, Twilio, etc.
-      console.log(`Mock: Sending OTP to ${phoneNumber}`);
+      const { sendOTPToPhone } = await import('./firebase/config.js');
+      const result = await sendOTPToPhone(phoneNumber);
       
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // For demo, always return success
-      return { 
-        success: true, 
-        message: 'OTP sent to your phone',
-        demoOtp: '123456' // Starting with 1 for demo verification
-      };
+      if (result.success) {
+        return { 
+          success: true, 
+          message: 'OTP sent to your phone',
+          demoOtp: 'Check your phone for the OTP code'
+        };
+      } else {
+        return { success: false, error: result.error };
+      }
     } catch (error) {
       console.error('Send OTP error:', error);
       return { success: false, error: 'Failed to send OTP' };

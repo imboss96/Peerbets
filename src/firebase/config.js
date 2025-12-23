@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
+import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyBYuEbHVbs-9eXqo9Ds92C6HR70__tJbV0",
@@ -24,6 +25,45 @@ export const auth = getAuth(app);
 
 // Initialize Storage
 export const storage = getStorage(app);
+
+// Initialize reCAPTCHA verifier globally
+export const initializeRecaptcha = () => {
+  if (!window.recaptchaVerifier) {
+    window.recaptchaVerifier = new RecaptchaVerifier('recaptcha-container', {
+      size: 'invisible',
+      callback: (response) => {
+        console.log('reCAPTCHA verified');
+      }
+    }, auth);
+  }
+  return window.recaptchaVerifier;
+};
+
+// Phone Auth functions
+export const sendOTPToPhone = async (phoneNumber) => {
+  try {
+    const verifier = initializeRecaptcha();
+    const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, verifier);
+    window.confirmationResult = confirmationResult;
+    return { success: true, message: 'OTP sent to your phone' };
+  } catch (error) {
+    console.error('Send OTP error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const verifyOTPCode = async (otpCode) => {
+  try {
+    if (!window.confirmationResult) {
+      return { success: false, error: 'No confirmation result. Send OTP first.' };
+    }
+    const result = await window.confirmationResult.confirm(otpCode);
+    return { success: true, user: result.user };
+  } catch (error) {
+    console.error('Verify OTP error:', error);
+    return { success: false, error: error.message };
+  }
+};
 
 // Export app as default
 export default app;
