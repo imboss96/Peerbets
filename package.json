@@ -1,6 +1,6 @@
 {
   "name": "sparkbets",
-  "version": "1.0.0",
+  "version": "2.3",
   "private": true,
   "description": "P2P Sports Betting Platform",
   "dependencies": {
