@@ -1,124 +1,120 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Zap, Volume2, VolumeX, Settings, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, Volume2, VolumeX, Settings, TrendingUp, Users, MessageSquare, History, Zap } from 'lucide-react';
 import FlyGameAdminService from '../services/FlyGameAdminService';
-import VirtualGameAdminService from '../services/VirtualGameAdminService';
-import { collection, addDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';const Fly = ({ user, onBalanceUpdate, onBack, onPlaceBet, onSettleBet }) => {
-  const [gameState, setGameState] = useState('idle');
+
+const FlyAviator = ({ user, onBalanceUpdate, onBack, onPlaceBet, onSettleBet }) => {
+  // Game states
+  const [gameState, setGameState] = useState('countdown');
   const [multiplier, setMultiplier] = useState(1.0);
-  const [stake, setStake] = useState('');
-  const [betPlaced, setBetPlaced] = useState(false);
-  const [cashOutMultiplier, setCashOutMultiplier] = useState(null);
+  const [countdown, setCountdown] = useState(5);
+  
+  // Bet 1
+  const [bet1Amount, setBet1Amount] = useState('100');
+  const [bet1Active, setBet1Active] = useState(false);
+  const [bet1CashedOut, setBet1CashedOut] = useState(null);
+  const [autoCashout1, setAutoCashout1] = useState('');
+  
+  // Bet 2
+  const [bet2Amount, setBet2Amount] = useState('');
+  const [bet2Active, setBet2Active] = useState(false);
+  const [bet2CashedOut, setBet2CashedOut] = useState(null);
+  const [autoCashout2, setAutoCashout2] = useState('');
+  
+  // Game data
   const [gameHistory, setGameHistory] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [allBets, setAllBets] = useState([]);
+  const [myBets, setMyBets] = useState([]);
+  const [topWins, setTopWins] = useState([]);
+  const [selectedTab, setSelectedTab] = useState('all');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [crashSeries, setCrashSeries] = useState([]);
-  const [currentGameIndex, setCurrentGameIndex] = useState(0);
-  const [adminLogs, setAdminLogs] = useState([]);
-  const [nextCrashInput, setNextCrashInput] = useState('');
-  const [adminLoading, setAdminLoading] = useState(false);
-  const [autoBetEnabled, setAutoBetEnabled] = useState(false);
-  const [autoCashOutMultiplier, setAutoCashOutMultiplier] = useState(2.0);
-  const [autoStake, setAutoStake] = useState('');
-  const [consecutiveWins, setConsecutiveWins] = useState(0);
-  const [consecutiveLosses, setConsecutiveLosses] = useState(0);
-  const [autoCompleteEnabled, setAutoCompleteEnabled] = useState(false);
-  const [pendingBetsStats, setPendingBetsStats] = useState(null);
+  const [error, setError] = useState('');
   
+  // Refs
+  const crashPointRef = useRef(2.5);
+  const canvasRef = useRef(null);
   const gameLoopRef = useRef(null);
-  const crashPointRef = useRef(null);
-  const audioRef = useRef(new Audio('data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAA=='));
-
+  
   const MIN_CRASH = 1.01;
-  const MAX_CRASH = 1000000;
-  const INCREMENT_SPEED = 0.01;
+  const MAX_CRASH = 100;
 
-  // Auto-bet logic
+  // Generate random crash point
+  const generateCrashPoint = () => {
+    const random = Math.random();
+    if (random < 0.5) return 1.0 + Math.random() * 1.5; // 1.0-2.5x (50%)
+    if (random < 0.8) return 2.5 + Math.random() * 2.5; // 2.5-5.0x (30%)
+    if (random < 0.95) return 5.0 + Math.random() * 5.0; // 5.0-10.0x (15%)
+    return 10.0 + Math.random() * 90.0; // 10.0-100.0x (5%)
+  };
+
+  // Generate fake player bets
+  const generateFakeBets = () => {
+    const names = ['John', 'Sarah', 'Mike', 'Emma', 'David', 'Lisa', 'Tom', 'Anna'];
+    const newBets = [];
+    for (let i = 0; i < 8; i++) {
+      newBets.push({
+        id: Math.random(),
+        player: names[Math.floor(Math.random() * names.length)],
+        amount: (Math.random() * 500 + 50).toFixed(2),
+        multiplier: null,
+        cashedOut: false
+      });
+    }
+    return newBets;
+  };
+
+  // Initialize game
   useEffect(() => {
-    if (autoBetEnabled && gameState === 'idle' && !betPlaced && autoStake && autoStake > 0) {
-      // Auto-place bet after a short delay
-      const timer = setTimeout(() => {
-        setStake(autoStake);
-        handlePlaceBet();
+    crashPointRef.current = generateCrashPoint();
+    setAllBets(generateFakeBets());
+  }, []);
+
+  // Countdown timer
+  useEffect(() => {
+    if (gameState === 'countdown') {
+      const timer = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            startGame();
+            return 5;
+          }
+          return prev - 1;
+        });
       }, 1000);
-      return () => clearTimeout(timer);
+      return () => clearInterval(timer);
     }
-  }, [autoBetEnabled, gameState, betPlaced, autoStake]);
+  }, [gameState]);
 
-  // Auto-cashout logic
-  useEffect(() => {
-    if (autoBetEnabled && gameState === 'running' && betPlaced && multiplier >= autoCashOutMultiplier) {
-      handleCashOut();
-    }
-  }, [autoBetEnabled, gameState, betPlaced, multiplier, autoCashOutMultiplier]);
-
-  // Fetch config on mount and when admin panel opens
-  useEffect(() => {
-    fetchCrashSeriesConfig();
-    if (user?.isAdmin) {
-      fetchPendingBetsStats();
-    }
-  }, [user?.isAdmin]);
-
-  useEffect(() => {
-    if (showAdminPanel && user?.isAdmin) {
-      fetchAdminLogs();
-    }
-  }, [showAdminPanel]);
-
-  const fetchCrashSeriesConfig = async () => {
-    const result = await FlyGameAdminService.getCrashSeriesConfig();
-    if (result.success) {
-      setCrashSeries(result.data.crashSeries || []);
-      setCurrentGameIndex(result.data.currentGameIndex || 0);
-    }
-  };
-
-  const fetchAdminLogs = async () => {
-    const result = await FlyGameAdminService.getAdminLogs(20);
-    if (result.success) {
-      setAdminLogs(result.data);
-    }
-  };
-
-  const getCrashPoint = () => {
-    if (crashSeries.length === 0) return 2.5;
-    const nextIndex = currentGameIndex % crashSeries.length;
-    return crashSeries[nextIndex];
-  };
-
-  useEffect(() => {
-    if (gameState === 'idle') {
-      const crash = getCrashPoint();
-      crashPointRef.current = crash;
-    }
-  }, [gameState, crashSeries, currentGameIndex]);
-
+  // Game loop - exponential growth with increasing speed
   useEffect(() => {
     if (gameState !== 'running') return;
 
     gameLoopRef.current = setInterval(() => {
       setMultiplier(prev => {
-        const newMult = Number((prev + INCREMENT_SPEED).toFixed(2));
+        // Exponential increment: speed increases as multiplier increases
+        const increment = Math.max(0.001, prev * 0.008); // 0.8% of current multiplier per tick
+        const newMult = Number((prev + increment).toFixed(2));
+        
+        // Check auto-cashouts
+        if (bet1Active && !bet1CashedOut && autoCashout1 && newMult >= parseFloat(autoCashout1)) {
+          handleCashout(1, newMult);
+        }
+        if (bet2Active && !bet2CashedOut && autoCashout2 && newMult >= parseFloat(autoCashout2)) {
+          handleCashout(2, newMult);
+        }
+
+        // Update fake players
+        setAllBets(prev => prev.map(bet => {
+          if (!bet.cashedOut && Math.random() > 0.98) {
+            return { ...bet, multiplier: newMult, cashedOut: true };
+          }
+          return bet;
+        }));
         
         if (newMult >= crashPointRef.current) {
           clearInterval(gameLoopRef.current);
-          setGameState('crashed');
-          if (soundEnabled) playSound();
-          
-          // Update game state and stats
-          const nextIndex = (currentGameIndex + 1) % crashSeries.length;
-          setCurrentGameIndex(nextIndex);
-          updateGameIndexInFirestore(nextIndex);
-          
-          // Track loss if bet was placed
-          if (betPlaced && !cashOutMultiplier) {
-            setConsecutiveLosses(prev => prev + 1);
-            setConsecutiveWins(0);
-          }
-          
+          crashGame();
           return crashPointRef.current;
         }
         
@@ -127,691 +123,594 @@ import { db } from '../firebase/config';const Fly = ({ user, onBalanceUpdate, on
     }, 100);
 
     return () => clearInterval(gameLoopRef.current);
-  }, [gameState, soundEnabled, currentGameIndex, crashSeries, betPlaced, cashOutMultiplier]);
+  }, [gameState, bet1Active, bet2Active, bet1CashedOut, bet2CashedOut, autoCashout1, autoCashout2]);
 
-  const updateGameIndexInFirestore = async (newIndex) => {
-    try {
-      const result = await FlyGameAdminService.updateCrashSeries(crashSeries, user.uid);
-      if (!result.success) {
-        console.error('Update index failed:', result.error);
+  // Canvas animation
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    const drawGraph = () => {
+      ctx.clearRect(0, 0, width, height);
+      
+      // Grid
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < width; i += 50) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i, height);
+        ctx.stroke();
       }
-    } catch (err) {
-      console.error('Update game index error:', err);
-    }
-  };
+      for (let i = 0; i < height; i += 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        ctx.lineTo(width, i);
+        ctx.stroke();
+      }
+      
+      if (gameState === 'running') {
+        // Draw exponential curve
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        
+        const points = 100;
+        for (let i = 0; i < points; i++) {
+          const x = (i / points) * width;
+          // Exponential curve: y = e^(progress * 3)
+          // This creates the curved line that accelerates like Aviator
+          const progress = (multiplier - 1) / (crashPointRef.current - 1);
+          const exponentialProgress = Math.min(1, progress);
+          
+          // Calculate y using exponential function (curves upward)
+          const curveValue = (Math.exp(exponentialProgress * (i / points) * 2) - 1) / (Math.exp(2) - 1);
+          const y = height - (curveValue * height);
+          
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        
+        // Draw plane - keep it visible on canvas like Aviator
+        const planeProgress = Math.min(1, (multiplier - 1) / (crashPointRef.current - 1));
+        const planeX = width * Math.min(0.90, 0.1 + (planeProgress * 0.8)); // Moves from 10% to 90% of width
+        const planeCurve = Math.min(0.85, (Math.exp(planeProgress * 2) - 1) / (Math.exp(2) - 1)); // Caps at 85% height
+        const planeY = height - (planeCurve * height * 0.9); // Stays within 90% of canvas height
+        ctx.fillStyle = '#22c55e';
+        ctx.font = '30px Arial';
+        ctx.fillText('✈️', planeX, planeY);
+      } else if (gameState === 'crashed') {
+        // Red graph on crash
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, height);
+        ctx.lineTo(width * 0.8, height * 0.2);
+        ctx.stroke();
+        
+        // Explosion
+        ctx.fillStyle = '#ef4444';
+        ctx.font = '50px Arial';
+        ctx.fillText('💥', width * 0.75, height * 0.25);
+      }
+    };
+    
+    const animate = () => {
+      drawGraph();
+      requestAnimationFrame(animate);
+    };
+    
+    animate();
+  }, [gameState, multiplier]);
 
-  const playSound = () => {
-    try {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play().catch(() => {});
-    } catch (e) {
-      console.log('Sound play error:', e);
-    }
-  };
-
-  const startGame = async () => {
-    setError('');
+  const startGame = () => {
     setGameState('running');
     setMultiplier(1.0);
-    setBetPlaced(false);
-    setCashOutMultiplier(null);
-    setGameHistory(prev => [
-      { multiplier: crashPointRef.current || 2.5, timestamp: new Date().toLocaleTimeString(), crashPoint: true },
-      ...prev.slice(0, 9)
-    ]);
+    setBet1CashedOut(null);
+    setBet2CashedOut(null);
+    // Bets are only activated when user clicks "PLACE BET"
   };
 
-  const handlePlaceBet = async () => {
-    if (!user) {
-      setError('Please login to place a bet');
+  const crashGame = () => {
+    setGameState('crashed');
+    
+    // Add to history
+    setGameHistory(prev => [crashPointRef.current, ...prev.slice(0, 9)]);
+    
+    // Handle losses
+    if (bet1Active && !bet1CashedOut) {
+      const loss = {
+        amount: parseFloat(bet1Amount),
+        multiplier: crashPointRef.current,
+        profit: -parseFloat(bet1Amount),
+        time: new Date().toLocaleTimeString()
+      };
+      setMyBets(prev => [loss, ...prev.slice(0, 9)]);
+    }
+    if (bet2Active && !bet2CashedOut) {
+      const loss = {
+        amount: parseFloat(bet2Amount),
+        multiplier: crashPointRef.current,
+        profit: -parseFloat(bet2Amount),
+        time: new Date().toLocaleTimeString()
+      };
+      setMyBets(prev => [loss, ...prev.slice(0, 9)]);
+    }
+    
+    setBet1Active(false);
+    setBet2Active(false);
+    
+    // Reset after delay
+    setTimeout(() => {
+      crashPointRef.current = generateCrashPoint();
+      setGameState('countdown');
+      setCountdown(5);
+      setAllBets(generateFakeBets());
+    }, 3000);
+  };
+
+  const handlePlaceBet = (betNum) => {
+    if (gameState !== 'countdown') return;
+    const amount = betNum === 1 ? parseFloat(bet1Amount) : parseFloat(bet2Amount);
+    if (amount <= 0) {
+      setError('Enter valid bet amount');
       return;
     }
-
-    const stakeAmount = parseFloat(stake);
-    if (!stakeAmount || stakeAmount <= 0) {
-      setError('Please enter a valid stake amount');
-      return;
-    }
-
-    if (stakeAmount > user.balance) {
+    if (amount > user.balance) {
       setError('Insufficient balance');
       return;
     }
-
-    if (gameState !== 'idle') {
-      setError('Game already in progress. Wait for next round.');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-
-    const newBalance = user.balance - stakeAmount;
-    const betData = {
-      match: 'Fly Crash Game',
-      market: 'fly',
-      outcome: `Placed at ${multiplier.toFixed(2)}x`,
-      selection: 'crash_game',
-      stake: stakeAmount,
-      potentialWin: stakeAmount,
-      status: 'pending'
-    };
-
-    const result = await onPlaceBet(betData, newBalance);
-
-    if (result.success) {
-      onBalanceUpdate(newBalance);
-      setBetPlaced(true);
-      setStake('');
-      await startGame();
-    } else {
-      setError(result.error || 'Failed to place bet');
-    }
-
-    setLoading(false);
-  };
-
-  const handleCashOut = async () => {
-    if (!betPlaced || gameState !== 'running') {
-      setError('Cannot cash out at this time');
-      return;
-    }
-
-    setCashOutMultiplier(multiplier);
-    clearInterval(gameLoopRef.current);
-    setGameState('idle');
-
-    const stakeAmount = parseFloat(stake) || 0;
-    const winnings = stakeAmount * multiplier;
-    const newBalance = user.balance + winnings;
-
-    await onBalanceUpdate(newBalance);
     
-    // Track win
-    setConsecutiveWins(prev => prev + 1);
-    setConsecutiveLosses(0);
-
-    setBetPlaced(false);
-    if (!autoBetEnabled) {
-      alert(`🎉 Cashed out at ${multiplier.toFixed(2)}x! Won ${winnings.toFixed(2)} KSH`);
+    // Deduct from balance
+    const newBalance = user.balance - amount;
+    onBalanceUpdate(newBalance);
+    
+    // Activate the bet
+    if (betNum === 1) {
+      setBet1Active(true);
+    } else {
+      setBet2Active(true);
     }
-  };
-
-  const resetGame = () => {
-    setGameState('idle');
-    setBetPlaced(false);
-    setCashOutMultiplier(null);
-    setMultiplier(1.0);
+    
     setError('');
   };
 
-  const handleSetNextCrash = async () => {
-    if (!user?.isAdmin) {
-      alert('Admin only');
-      return;
-    }
-
-    const crashValue = parseFloat(nextCrashInput);
-    if (isNaN(crashValue) || crashValue < MIN_CRASH || crashValue > MAX_CRASH) {
-      alert(`Enter a value between ${MIN_CRASH} and ${MAX_CRASH}`);
-      return;
-    }
-
-    setAdminLoading(true);
-    const result = await FlyGameAdminService.setNextCrash(crashValue, user.uid);
-    setAdminLoading(false);
-
-    if (result.success) {
-      alert(`✅ ${result.message}\nGame ${result.gameIndex}`);
-      setNextCrashInput('');
-      await fetchCrashSeriesConfig();
-    } else {
-      alert('❌ Error: ' + result.error);
-    }
-  };
-
-  const handleResetGameIndex = async () => {
-    if (!user?.isAdmin) {
-      alert('Admin only');
-      return;
-    }
-
-    if (!window.confirm('Reset game index to 0?')) return;
-
-    setAdminLoading(true);
-    const result = await FlyGameAdminService.resetGameIndex(user.uid);
-    setAdminLoading(false);
-
-    if (result.success) {
-      alert(result.message);
-      await fetchCrashSeriesConfig();
-    } else {
-      alert('Error: ' + result.error);
+  const handleCashout = async (betNum, mult = null) => {
+    const cashoutMult = mult || multiplier;
+    
+    if (betNum === 1 && bet1Active && !bet1CashedOut) {
+      const amount = parseFloat(bet1Amount);
+      const winnings = amount * cashoutMult;
+      const profit = winnings - amount;
+      const newBalance = user.balance + winnings;
+      
+      setBet1CashedOut(cashoutMult);
+      setBet1Active(false);
+      onBalanceUpdate(newBalance);
+      
+      const myBet = {
+        amount,
+        multiplier: cashoutMult,
+        profit,
+        time: new Date().toLocaleTimeString()
+      };
+      setMyBets(prev => [myBet, ...prev.slice(0, 9)]);
+      setTopWins(prev => [myBet, ...prev.slice(0, 9)].sort((a, b) => b.profit - a.profit));
+    } else if (betNum === 2 && bet2Active && !bet2CashedOut) {
+      const amount = parseFloat(bet2Amount);
+      const winnings = amount * cashoutMult;
+      const profit = winnings - amount;
+      const newBalance = user.balance + winnings;
+      
+      setBet2CashedOut(cashoutMult);
+      setBet2Active(false);
+      onBalanceUpdate(newBalance);
+      
+      const myBet = {
+        amount,
+        multiplier: cashoutMult,
+        profit,
+        time: new Date().toLocaleTimeString()
+      };
+      setMyBets(prev => [myBet, ...prev.slice(0, 9)]);
+      setTopWins(prev => [myBet, ...prev.slice(0, 9)].sort((a, b) => b.profit - a.profit));
     }
   };
 
-  const handleGenerateNewSeries = async () => {
-    if (!user?.isAdmin) {
-      alert('Admin only');
-      return;
-    }
-
-    if (!window.confirm('Generate new random series? Current series will be replaced.')) return;
-
-    setAdminLoading(true);
-    const result = await FlyGameAdminService.generateNewSeries(20, user.uid);
-    setAdminLoading(false);
-
-    if (result.success) {
-      alert('✅ New series generated');
-      await fetchCrashSeriesConfig();
+  const handleCancel = (betNum) => {
+    if (gameState !== 'countdown') return;
+    if (betNum === 1) {
+      setBet1Amount('100');
     } else {
-      alert('Error: ' + result.error);
-    }
-  };
-
-  // Auto-complete pending bets effect
-  useEffect(() => {
-    if (!autoCompleteEnabled || !user?.isAdmin) return;
-
-    const interval = setInterval(async () => {
-      const result = await VirtualGameAdminService.autoCompletePendingBets('fly');
-      if (result.success && result.completedCount > 0) {
-        console.log(`Auto-completed ${result.completedCount} Fly bets`);
-        // Refresh stats
-        fetchPendingBetsStats();
-      }
-    }, 30000); // Run every 30 seconds
-
-    return () => clearInterval(interval);
-  }, [autoCompleteEnabled, user?.isAdmin]);
-
-  const fetchPendingBetsStats = async () => {
-    const result = await VirtualGameAdminService.getPendingBetsStats('fly');
-    if (result.success) {
-      setPendingBetsStats(result.data);
+      setBet2Amount('');
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-blue-400 hover:text-blue-300 transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          Back to Matches
-        </button>
-        <div className="flex items-center gap-3">
-          <h2 className="text-2xl font-bold text-white">Fly Crash Game</h2>
-          <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="p-2 rounded-lg bg-slate-700/50 hover:bg-slate-700"
-          >
-            {soundEnabled ? (
-              <Volume2 className="w-5 h-5 text-white" />
-            ) : (
-              <VolumeX className="w-5 h-5 text-gray-400" />
-            )}
-          </button>
-          {user?.isAdmin && (
-            <button
-              onClick={() => setShowAdminPanel(!showAdminPanel)}
-              className="p-2 rounded-lg bg-purple-600/50 hover:bg-purple-600"
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={onBack}
+              className="p-2 bg-slate-800/50 hover:bg-slate-700/50 rounded-lg transition-colors"
             >
-              <Settings className="w-5 h-5 text-white" />
+              <ArrowLeft className="w-5 h-5" />
             </button>
-          )}
-        </div>
-      </div>
-
-      {/* Admin Panel */}
-      {showAdminPanel && user?.isAdmin && (
-        <div className="bg-purple-900/50 border border-purple-500/30 rounded-xl p-6 space-y-6">
-          <h3 className="text-lg font-bold text-white">🛠️ Admin: Fly Game Control</h3>
-
-          {/* Quick Set Next Crash */}
-          <div className="bg-slate-900/50 border border-purple-500/20 rounded-lg p-4">
-            <h4 className="text-sm font-bold text-white mb-3">⚡ Quick Set Next Crash (Testing)</h4>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={nextCrashInput}
-                onChange={(e) => setNextCrashInput(e.target.value)}
-                placeholder="e.g., 2.5, 5.0, 10.5"
-                step="0.01"
-                min={MIN_CRASH}
-                max={MAX_CRASH}
-                className="flex-1 bg-slate-800 border border-purple-500/30 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-              />
-              <button
-                onClick={handleSetNextCrash}
-                disabled={adminLoading}
-                className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg"
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-green-500 to-blue-500 bg-clip-text text-transparent">
+              Sparkfly
+            </h1>
+            <div className="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-lg">
+              <span className="text-sm text-gray-400">Balance:</span>
+              <span className="text-lg font-bold text-yellow-400">KSH {(user?.balance || 0).toLocaleString()}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="p-2 bg-slate-800/50 hover:bg-slate-700/50 rounded-lg transition-colors">
+              <MessageSquare className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="p-2 bg-slate-800/50 hover:bg-slate-700/50 rounded-lg transition-colors"
+            >
+              {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+            </button>
+            {user?.isAdmin && (
+              <button 
+                onClick={() => setShowAdminPanel(!showAdminPanel)}
+                className="p-2 bg-slate-800/50 hover:bg-slate-700/50 rounded-lg transition-colors"
               >
-                {adminLoading ? 'Saving...' : 'Set'}
+                <Settings className="w-5 h-5" />
               </button>
-            </div>
-            <p className="text-xs text-gray-400 mt-2">Sets the crash value for the next game</p>
+            )}
           </div>
+        </div>
 
-          {/* Game Status */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-              <p className="text-xs text-gray-400 mb-1">Series Length</p>
-              <p className="text-xl font-bold text-blue-400">{crashSeries.length}</p>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-              <p className="text-xs text-gray-400 mb-1">Current Index</p>
-              <p className="text-xl font-bold text-blue-400">{currentGameIndex}</p>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-              <p className="text-xs text-gray-400 mb-1">Next Crash</p>
-              <p className="text-xl font-bold text-red-400">{getCrashPoint().toFixed(2)}x</p>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-              <p className="text-xs text-gray-400 mb-1">Game State</p>
-              <p className="text-xl font-bold text-yellow-400 capitalize">{gameState}</p>
-            </div>
-          </div>
-
-          {/* Admin Actions */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <button
-              onClick={handleResetGameIndex}
-              disabled={adminLoading}
-              className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-bold py-2 rounded-lg transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Reset Game Index to 0
-            </button>
-            <button
-              onClick={handleGenerateNewSeries}
-              disabled={adminLoading}
-              className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2 rounded-lg transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Generate New Series
-            </button>
-          </div>
-
-          {/* Auto-Complete Virtual Bets Section */}
-          <div className="bg-slate-900/50 border border-purple-500/20 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-bold text-white">Auto-Complete Pending Bets</h4>
-              <button
-                onClick={async () => {
-                  const newState = !autoCompleteEnabled;
-                  setAutoCompleteEnabled(newState);
-                  const result = await VirtualGameAdminService.setAutoCompleteConfig('fly', newState, 30);
-                  if (result.success) {
-                    alert(result.message);
-                  }
-                }}
-                className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                  autoCompleteEnabled
-                    ? 'bg-green-600 hover:bg-green-700 text-white'
-                    : 'bg-gray-600 hover:bg-gray-700 text-white'
+        {/* Game History Bar */}
+        <div className="bg-slate-800/30 rounded-lg p-3 mb-6 flex items-center gap-2 overflow-x-auto">
+          <History className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <div className="flex gap-2">
+            {gameHistory.map((mult, idx) => (
+              <div
+                key={idx}
+                className={`px-3 py-1 rounded font-bold text-sm whitespace-nowrap ${
+                  mult >= 2 ? 'bg-purple-500/20 text-purple-300' :
+                  mult >= 1.5 ? 'bg-blue-500/20 text-blue-300' :
+                  'bg-gray-500/20 text-gray-300'
                 }`}
               >
-                {autoCompleteEnabled ? '✓ Active' : 'Inactive'}
-              </button>
-            </div>
-
-            {pendingBetsStats && (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
-                <div className="bg-slate-800 rounded-lg p-2 border border-slate-700">
-                  <p className="text-xs text-gray-400">Pending Bets</p>
-                  <p className="text-lg font-bold text-yellow-400">{pendingBetsStats.pendingBetsCount}</p>
-                </div>
-                <div className="bg-slate-800 rounded-lg p-2 border border-slate-700">
-                  <p className="text-xs text-gray-400">Total Stake</p>
-                  <p className="text-lg font-bold text-blue-400">KSH {pendingBetsStats.totalStake.toLocaleString()}</p>
-                </div>
-                <div className="bg-slate-800 rounded-lg p-2 border border-slate-700">
-                  <p className="text-xs text-gray-400">Potential Payout</p>
-                  <p className="text-lg font-bold text-green-400">KSH {pendingBetsStats.totalPotentialWin.toLocaleString()}</p>
-                </div>
-                <div className="bg-slate-800 rounded-lg p-2 border border-slate-700">
-                  <p className="text-xs text-gray-400">Risk</p>
-                  <p className={`text-lg font-bold ${pendingBetsStats.totalRisk > 0 ? 'text-red-400' : 'text-green-400'}`}>
-                    KSH {Math.abs(pendingBetsStats.totalRisk).toLocaleString()}
-                  </p>
-                </div>
+                {mult.toFixed(2)}x
               </div>
-            )}
-
-            <button
-              onClick={async () => {
-                const result = await VirtualGameAdminService.autoCompletePendingBets('fly');
-                if (result.success) {
-                  alert(`✅ ${result.message}\n\nCompleted: ${result.completedCount} bets`);
-                  await fetchPendingBetsStats();
-                } else {
-                  alert('❌ Error: ' + result.error);
-                }
-              }}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-lg transition-colors"
-            >
-              Complete Pending Bets Now
-            </button>
-            <p className="text-xs text-purple-300 mt-2">
-              {autoCompleteEnabled 
-                ? '✓ Auto-completing every 30 seconds' 
-                : 'Manual completion only'}
-            </p>
-          </div>
-
-          {/* Admin Logs */}
-          <div className="bg-slate-900/50 border border-purple-500/20 rounded-lg p-4">
-            <h4 className="text-sm font-bold text-white mb-3">📋 Admin Action Logs</h4>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {adminLogs.length === 0 ? (
-                <p className="text-xs text-gray-500">No logs yet</p>
-              ) : (
-                adminLogs.reverse().map((log, idx) => (
-                  <div key={idx} className="p-2 bg-slate-800 rounded-lg border border-slate-700/50 text-xs">
-                    <div className="flex justify-between mb-1">
-                      <span className="text-yellow-400 font-mono">{log.action}</span>
-                      <span className="text-gray-500">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                    <div className="text-gray-400 font-mono">
-                      {JSON.stringify(log.details).substring(0, 80)}...
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+            ))}
           </div>
         </div>
-      )}
 
-      {/* Game Display */}
-      <div className="bg-gradient-to-br from-slate-900 to-slate-800 border border-blue-500/20 rounded-xl p-12 text-center">
-        <div className="relative">
-          <div className="mb-8">
-            <div className={`text-6xl transition-all duration-100 ${
-              gameState === 'crashed' ? 'animate-bounce text-red-500' : 'text-blue-400'
-            }`}>
-              ✈️
-            </div>
-          </div>
-
-          <div className={`text-7xl font-bold mb-4 transition-all duration-100 ${
-            gameState === 'crashed' ? 'text-red-500' : 'text-green-400'
-          }`}>
-            {multiplier.toFixed(2)}x
-          </div>
-
-          {gameState === 'crashed' && (
-            <div className="text-xl font-bold text-red-500 mb-4">
-              💥 CRASHED AT {crashPointRef.current?.toFixed(2)}x!
-            </div>
-          )}
-
-          {gameState === 'idle' && betPlaced && cashOutMultiplier && (
-            <div className="text-lg text-green-400 mb-4">
-              ✅ Cashed out at {cashOutMultiplier.toFixed(2)}x
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Game Controls & Betting */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Betting Panel */}
-        <div className="lg:col-span-2 bg-slate-800/50 border border-blue-500/20 rounded-xl p-6">
-          <h3 className="text-lg font-bold text-white mb-4">Place Your Bet</h3>
-
-          <div className="space-y-4">
-            <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700">
-              <p className="text-sm text-gray-400 mb-1">Available Balance</p>
-              <p className="text-2xl font-bold text-green-400">
-                KSH {(user?.balance || 0).toLocaleString()}
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Stake Amount</label>
-              <input
-                type="number"
-                value={stake}
-                onChange={(e) => setStake(e.target.value)}
-                placeholder="Enter amount"
-                disabled={gameState !== 'idle' || loading}
-                className="w-full bg-slate-900/50 border border-blue-500/30 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Game Area */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Game Canvas */}
+            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700/50 relative overflow-hidden h-96">
+              <canvas 
+                ref={canvasRef} 
+                width={800} 
+                height={400}
+                className="w-full h-full absolute inset-0"
               />
-            </div>
-
-            <div className="grid grid-cols-4 gap-2">
-              {[100, 500, 1000, 5000].map(amt => (
-                <button
-                  key={amt}
-                  onClick={() => setStake(amt.toString())}
-                  disabled={gameState !== 'idle'}
-                  className="bg-blue-600/20 hover:bg-blue-600/30 disabled:opacity-50 border border-blue-500/30 text-blue-300 text-sm font-medium py-2 rounded-lg transition-colors"
-                >
-                  {amt}
-                </button>
-              ))}
-            </div>
-
-            {/* AutoBet Section */}
-            <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-bold text-white">Auto Bet</h4>
-                <button
-                  onClick={() => {
-                    if (gameState === 'running') {
-                      alert('Stop the current game before toggling auto bet');
-                      return;
-                    }
-                    setAutoBetEnabled(!autoBetEnabled);
-                  }}
-                  disabled={gameState === 'running'}
-                  className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                    autoBetEnabled
-                      ? 'bg-green-600 hover:bg-green-700 text-white'
-                      : 'bg-gray-600 hover:bg-gray-700 text-white'
-                  } disabled:opacity-50`}
-                >
-                  {autoBetEnabled ? '✓ Enabled' : 'Disabled'}
-                </button>
-              </div>
-
-              {autoBetEnabled && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Auto Stake Amount</label>
-                    <input
-                      type="number"
-                      value={autoStake}
-                      onChange={(e) => setAutoStake(e.target.value)}
-                      placeholder="e.g., 100"
-                      className="w-full bg-slate-900/50 border border-purple-500/30 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500"
-                    />
+              
+              {/* Multiplier Display */}
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                {gameState === 'countdown' && (
+                  <div className="text-center">
+                    <div className="text-7xl font-bold text-blue-400 mb-4 animate-pulse">
+                      {countdown}
+                    </div>
+                    <div className="text-2xl text-gray-300">
+                      Place your bets...
+                    </div>
                   </div>
+                )}
+                
+                {gameState === 'running' && (
+                  <div className="text-9xl font-bold text-green-400 animate-pulse">
+                    {multiplier.toFixed(2)}x
+                  </div>
+                )}
+                
+                {gameState === 'crashed' && (
+                  <div className="text-center">
+                    <div className="text-6xl font-bold text-red-500 mb-4">
+                      CRASHED!
+                    </div>
+                    <div className="text-5xl text-red-400">
+                      {crashPointRef.current.toFixed(2)}x
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Betting Panel */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Bet 1 */}
+              <div className="bg-slate-800/50 rounded-xl p-6 border border-green-500/20">
+                <h3 className="text-lg font-bold text-white mb-4">Bet 1 (Green)</h3>
+                <div className="space-y-4">
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Auto Cash Out At</label>
+                    <label className="block text-sm font-semibold text-green-300 mb-2 uppercase tracking-wider">Bet Amount (KSH)</label>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setBet1Amount((prev) => (parseFloat(prev) / 2).toFixed(2))}
+                        className="px-3 py-2 bg-gradient-to-br from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 rounded-lg font-bold text-sm transition-all shadow-lg hover:shadow-green-500/30"
+                      >
+                        ½
+                      </button>
+                      <input
+                        type="number"
+                        value={bet1Amount}
+                        onChange={(e) => setBet1Amount(e.target.value)}
+                        disabled={gameState === 'running'}
+                        className="flex-1 bg-gradient-to-br from-slate-800 to-slate-900 border-2 border-green-500/30 rounded-lg px-4 py-3 text-white text-lg font-semibold disabled:opacity-50 focus:border-green-500 focus:outline-none focus:shadow-lg focus:shadow-green-500/50 transition-all placeholder-gray-500"
+                      />
+                      <button 
+                        onClick={() => setBet1Amount((prev) => (parseFloat(prev) * 2).toFixed(2))}
+                        className="px-3 py-2 bg-gradient-to-br from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 rounded-lg font-bold text-sm transition-all shadow-lg hover:shadow-green-500/30"
+                      >
+                        2×
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-green-300 mb-2 uppercase tracking-wider">Auto Cashout At</label>
                     <input
                       type="number"
-                      value={autoCashOutMultiplier}
-                      onChange={(e) => setAutoCashOutMultiplier(parseFloat(e.target.value) || 2.0)}
-                      placeholder="e.g., 2.0"
+                      value={autoCashout1}
+                      onChange={(e) => setAutoCashout1(e.target.value)}
+                      placeholder="e.g. 2.5x"
                       step="0.1"
                       min="1.01"
-                      max="100"
-                      className="w-full bg-slate-900/50 border border-purple-500/30 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500"
+                      className="w-full bg-gradient-to-br from-slate-800 to-slate-900 border-2 border-green-500/30 rounded-lg px-4 py-3 text-white text-lg font-semibold focus:border-green-500 focus:outline-none focus:shadow-lg focus:shadow-green-500/50 transition-all placeholder-gray-500"
                     />
                   </div>
-                  <p className="text-xs text-purple-300">
-                    Auto bets will place at: {autoStake} KSH and cash out automatically at {autoCashOutMultiplier}x
-                  </p>
-                </div>
-              )}
-            </div>
 
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                <p className="text-sm text-red-400">{error}</p>
+                  {!bet1Active ? (
+                    <>
+                      <button
+                        onClick={() => handlePlaceBet(1)}
+                        disabled={gameState !== 'countdown'}
+                        className="w-full py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 disabled:from-gray-600 disabled:to-gray-600 text-white font-bold rounded-lg transition-all disabled:cursor-not-allowed"
+                      >
+                        {gameState === 'countdown' ? 'PLACE BET' : 'WAIT...'}
+                      </button>
+                      {gameState === 'countdown' && (
+                        <button
+                          onClick={() => handleCancel(1)}
+                          className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </>
+                  ) : bet1CashedOut ? (
+                    <div className="w-full py-3 bg-green-600/20 border-2 border-green-500 rounded-lg font-bold text-center text-green-400">
+                      WON KSH {(parseFloat(bet1Amount) * bet1CashedOut).toLocaleString()}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleCashout(1)}
+                      className="w-full py-3 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 text-white font-bold rounded-lg animate-pulse transition-all"
+                    >
+                      CASHOUT KSH {(parseFloat(bet1Amount) * multiplier).toLocaleString()}
+                    </button>
+                  )}
+                </div>
               </div>
-            )}
 
-            <div className="flex gap-3 pt-4">
-              {gameState === 'idle' && !betPlaced && (
-                <button
-                  onClick={handlePlaceBet}
-                  disabled={loading || !stake}
-                  className="flex-1 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 disabled:from-gray-600 disabled:to-gray-600 text-white font-bold py-3 rounded-lg transition-all"
-                >
-                  {loading ? 'Placing...' : 'Place Bet & Start Game'}
-                </button>
-              )}
-
-              {gameState === 'running' && betPlaced && (
-                <button
-                  onClick={handleCashOut}
-                  className="flex-1 bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-700 hover:to-yellow-800 text-white font-bold py-3 rounded-lg transition-all animate-pulse"
-                >
-                  💰 CASH OUT @ {multiplier.toFixed(2)}x
-                </button>
-              )}
-
-              {gameState === 'crashed' && betPlaced && !cashOutMultiplier && (
-                <button
-                  onClick={resetGame}
-                  className="flex-1 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-lg"
-                >
-                  You Crashed! Try Again
-                </button>
-              )}
-
-              {gameState === 'idle' && betPlaced && cashOutMultiplier && (
-                <button
-                  onClick={() => {
-                    setBetPlaced(false);
-                    setCashOutMultiplier(null);
-                    setStake('');
-                  }}
-                  className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold py-3 rounded-lg transition-all"
-                >
-                  Play Again
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Game Stats & CashOut Info */}
-        <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6 h-fit">
-          <h3 className="text-lg font-bold text-white mb-4">Game Stats</h3>
-
-          {betPlaced && (
-            <div className="mb-6 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-              <p className="text-xs text-gray-400 mb-1">Current Bet</p>
-              <p className="text-xl font-bold text-white">
-                KSH {(parseFloat(stake) || 0).toLocaleString()}
-              </p>
-              {gameState === 'running' && (
-                <div className="mt-3 space-y-2">
-                  <div className="bg-green-500/20 rounded-lg p-2">
-                    <p className="text-xs text-green-300">Current Winnings</p>
-                    <p className="text-lg font-bold text-green-400">
-                      KSH {(parseFloat(stake) * multiplier).toLocaleString()}
-                    </p>
+              {/* Bet 2 */}
+              <div className="bg-slate-800/50 rounded-xl p-6 border border-blue-500/20">
+                <h3 className="text-lg font-bold text-white mb-4">Bet 2 (Blue)</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-blue-300 mb-2 uppercase tracking-wider">Bet Amount (KSH)</label>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setBet2Amount((prev) => (parseFloat(prev || '0') / 2).toFixed(2))}
+                        className="px-3 py-2 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg font-bold text-sm transition-all shadow-lg hover:shadow-blue-500/30"
+                      >
+                        ½
+                      </button>
+                      <input
+                        type="number"
+                        value={bet2Amount}
+                        onChange={(e) => setBet2Amount(e.target.value)}
+                        disabled={gameState === 'running'}
+                        placeholder="0.00"
+                        className="flex-1 bg-gradient-to-br from-slate-800 to-slate-900 border-2 border-blue-500/30 rounded-lg px-4 py-3 text-white text-lg font-semibold disabled:opacity-50 focus:border-blue-500 focus:outline-none focus:shadow-lg focus:shadow-blue-500/50 transition-all placeholder-gray-500"
+                      />
+                      <button 
+                        onClick={() => setBet2Amount((prev) => (parseFloat(prev || '10') * 2).toFixed(2))}
+                        className="px-3 py-2 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg font-bold text-sm transition-all shadow-lg hover:shadow-blue-500/30"
+                      >
+                        2×
+                      </button>
+                    </div>
                   </div>
-                  <div className="bg-yellow-500/20 rounded-lg p-2">
-                    <p className="text-xs text-yellow-300">Crash Point</p>
-                    <p className="text-lg font-bold text-yellow-400">
-                      {crashPointRef.current?.toFixed(2)}x
-                    </p>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-blue-300 mb-2 uppercase tracking-wider">Auto Cashout At</label>
+                    <input
+                      type="number"
+                      value={autoCashout2}
+                      onChange={(e) => setAutoCashout2(e.target.value)}
+                      placeholder="e.g. 3.0x"
+                      step="0.1"
+                      min="1.01"
+                      className="w-full bg-gradient-to-br from-slate-800 to-slate-900 border-2 border-blue-500/30 rounded-lg px-4 py-3 text-white text-lg font-semibold focus:border-blue-500 focus:outline-none focus:shadow-lg focus:shadow-blue-500/50 transition-all placeholder-gray-500"
+                    />
                   </div>
+
+                  {!bet2Active ? (
+                    <>
+                      <button
+                        onClick={() => handlePlaceBet(2)}
+                        disabled={gameState !== 'countdown' || !bet2Amount}
+                        className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-600 disabled:to-gray-600 text-white font-bold rounded-lg transition-all disabled:cursor-not-allowed"
+                      >
+                        {gameState === 'countdown' ? 'PLACE BET' : 'WAIT...'}
+                      </button>
+                      {gameState === 'countdown' && (
+                        <button
+                          onClick={() => handleCancel(2)}
+                          className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </>
+                  ) : bet2CashedOut ? (
+                    <div className="w-full py-3 bg-blue-600/20 border-2 border-blue-500 rounded-lg font-bold text-center text-blue-400">
+                      WON KSH {(parseFloat(bet2Amount) * bet2CashedOut).toLocaleString()}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleCashout(2)}
+                      className="w-full py-3 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 text-white font-bold rounded-lg animate-pulse transition-all"
+                    >
+                      CASHOUT KSH {(parseFloat(bet2Amount) * multiplier).toLocaleString()}
+                    </button>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Win/Loss Tracking */}
-          <div className="space-y-3 mb-6">
-            <div className="text-center p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-              <p className="text-xs text-gray-400 mb-1">Consecutive Wins</p>
-              <p className="text-xl font-bold text-green-400">{consecutiveWins} 🎉</p>
-            </div>
-            <div className="text-center p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-              <p className="text-xs text-gray-400 mb-1">Consecutive Losses</p>
-              <p className="text-xl font-bold text-red-400">{consecutiveLosses} 💔</p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="text-center p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-              <p className="text-xs text-gray-400 mb-1">Game Status</p>
-              <p className="text-sm font-bold text-white capitalize mt-1">
-                {gameState === 'running' ? '🎮 In Progress' : gameState === 'crashed' ? '💥 Crashed' : '⏸️ Waiting'}
-              </p>
-            </div>
-
-            {gameState === 'running' && (
-              <div className="text-center p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                <p className="text-xs text-red-300">⚠️ Game Running</p>
-                <p className="text-sm text-red-400 font-bold mt-1">Cash out or crash!</p>
               </div>
-            )}
+            </div>
           </div>
 
-          <div className="mt-6 pt-6 border-t border-slate-700">
-            <h4 className="text-sm font-bold text-white mb-3">Recent Games</h4>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {gameHistory.map((game, idx) => (
-                <div key={idx} className="flex items-center justify-between p-2 bg-slate-900/50 rounded-lg border border-slate-700/50">
-                  <span className="text-xs text-gray-400">{game.timestamp}</span>
-                  <span className={`text-sm font-bold ${game.crashPoint ? 'text-red-400' : 'text-green-400'}`}>
-                    {game.multiplier.toFixed(2)}x
-                  </span>
+          {/* Right Sidebar - Game Stats & Bets */}
+          <div className="space-y-6">
+            {/* Tabs */}
+            <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+              <div className="flex border-b border-slate-700">
+                <button
+                  onClick={() => setSelectedTab('all')}
+                  className={`flex-1 py-3 text-sm font-bold transition-colors ${
+                    selectedTab === 'all' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-4 h-4 inline mr-1" />
+                  All Bets
+                </button>
+                <button
+                  onClick={() => setSelectedTab('my')}
+                  className={`flex-1 py-3 text-sm font-bold transition-colors ${
+                    selectedTab === 'my' ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  My Bets
+                </button>
+                <button
+                  onClick={() => setSelectedTab('top')}
+                  className={`flex-1 py-3 text-sm font-bold transition-colors ${
+                    selectedTab === 'top' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <TrendingUp className="w-4 h-4 inline mr-1" />
+                  Top
+                </button>
+              </div>
+
+              <div className="p-4 max-h-96 overflow-y-auto space-y-2">
+                {selectedTab === 'all' && allBets.map((bet) => (
+                  <div key={bet.id} className="bg-slate-900/50 rounded-lg p-3 flex justify-between items-center">
+                    <div>
+                      <div className="font-medium text-sm">{bet.player}</div>
+                      <div className="text-xs text-gray-400">KSH {parseFloat(bet.amount).toLocaleString()}</div>
+                    </div>
+                    {bet.cashedOut ? (
+                      <div className="text-green-400 font-bold text-sm">
+                        {bet.multiplier.toFixed(2)}x
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 text-xs">
+                        Betting...
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {selectedTab === 'my' && (myBets.length === 0 ? (
+                  <div className="text-center text-gray-500 py-8">
+                    No bets yet
+                  </div>
+                ) : myBets.map((bet, idx) => (
+                  <div key={idx} className="bg-slate-900/50 rounded-lg p-3">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs text-gray-400">{bet.time}</span>
+                      <span className={`font-bold text-sm ${bet.profit > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {bet.profit > 0 ? '+' : ''}KSH {bet.profit.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs">KSH {parseFloat(bet.amount).toLocaleString()}</span>
+                      <span className="font-bold text-sm">{bet.multiplier.toFixed(2)}x</span>
+                    </div>
+                  </div>
+                )))}
+
+                {selectedTab === 'top' && (topWins.length === 0 ? (
+                  <div className="text-center text-gray-500 py-8">
+                    No wins yet
+                  </div>
+                ) : topWins.map((bet, idx) => (
+                  <div key={idx} className="bg-gradient-to-r from-yellow-900/20 to-orange-900/20 rounded-lg p-3 border border-yellow-500/20">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-bold text-yellow-400">#{idx + 1}</span>
+                      <span className="font-bold text-green-400 text-sm">
+                        +KSH {bet.profit.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs">KSH {parseFloat(bet.amount).toLocaleString()}</span>
+                      <span className="font-bold text-yellow-400 text-sm">{bet.multiplier.toFixed(2)}x</span>
+                    </div>
+                  </div>
+                )))}
+              </div>
+            </div>
+
+            {/* Game Status */}
+            <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4">
+              <h4 className="text-sm font-bold text-white mb-3">Game Status</h4>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center p-2 bg-slate-900/50 rounded">
+                  <span className="text-xs text-gray-400">State</span>
+                  <span className="text-sm font-bold text-blue-400 capitalize">{gameState}</span>
                 </div>
-              ))}
+                <div className="flex justify-between items-center p-2 bg-slate-900/50 rounded">
+                  <span className="text-xs text-gray-400">Current Multiplier</span>
+                  <span className="text-sm font-bold text-green-400">{multiplier.toFixed(2)}x</span>
+                </div>
+                <div className="flex justify-between items-center p-2 bg-slate-900/50 rounded">
+                  <span className="text-xs text-gray-400">Crash Point</span>
+                  <span className="text-sm font-bold text-orange-400">{crashPointRef.current.toFixed(2)}x</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* How to Play */}
-      <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-6">
-        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-          <Zap className="w-5 h-5 text-blue-400" />
-          How to Play
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="text-center">
-            <div className="bg-blue-500/20 w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2">
-              <span className="text-blue-400 font-bold">1</span>
-            </div>
-            <p className="text-sm text-gray-400">Place your stake</p>
+        {error && (
+          <div className="mt-6 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+            <p className="text-red-400">{error}</p>
           </div>
-          <div className="text-center">
-            <div className="bg-blue-500/20 w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2">
-              <span className="text-blue-400 font-bold">2</span>
-            </div>
-            <p className="text-sm text-gray-400">Game starts, multiplier rises</p>
-          </div>
-          <div className="text-center">
-            <div className="bg-blue-500/20 w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2">
-              <span className="text-blue-400 font-bold">3</span>
-            </div>
-            <p className="text-sm text-gray-400">Cash out before it crashes</p>
-          </div>
-          <div className="text-center">
-            <div className="bg-blue-500/20 w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2">
-              <span className="text-blue-400 font-bold">4</span>
-            </div>
-            <p className="text-sm text-gray-400">Win big or lose your bet!</p>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
 };
 
-export default Fly;
+export default FlyAviator;
